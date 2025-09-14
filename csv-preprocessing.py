@@ -325,6 +325,9 @@ def main():
     X_df = X_df.select_dtypes(include=[np.number]).copy()
     if X_df.shape[1] == 0:
         raise RuntimeError("Nu au rămas coloane numerice după filtrare.")
+    np.save("feature_names.npy", np.array(X_df.columns.tolist(), dtype=object))
+    print("[INFO] Salvat feature_names.npy cu", len(X_df.columns), "coloane.")
+
 
     # Binary labels
     y_bin = (df["label"].str.upper() != "BENIGN").astype(int).values
