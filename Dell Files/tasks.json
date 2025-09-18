@@ -1,0 +1,74 @@
+//.vscode/tasks.json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // The "docker-build" type indicates that this task is dedicated to building a Docker image.
+      // Behind the scenes, VS Code calls the Docker CLI to perform the build using the specified Dockerfile and context.
+      // It also handles pulling the latest base images if "pull": true.
+      "type": "docker-build",
+
+      // "label" provides an identifier for the task so that other tasks (or the launch config) can refer to it.
+      "label": "docker-build",
+
+      // "platform": "python" hints that the image is intended for a Python environment.
+      "platform": "python",
+
+      // The "dockerBuild" section contains all the parameters for the build process:
+      "dockerBuild": {
+        // "tag" names the image (here "my_image:latest"), so you can refer to it later.
+        "tag": "my_image:latest",
+
+        // "dockerfile" points to your Dockerfile. This file contains the instructions for building the image.
+        "dockerfile": "${workspaceFolder}/Dockerfile",
+
+        // "context" is the build context�the directory sent to Docker during the build. Usually, this is your project root.
+        "context": "${workspaceFolder}",
+
+        // "pull": true ensures that Docker pulls the latest version of base images used in your Dockerfile.
+        "pull": true
+      }
+    },
+    {
+      // The "docker-run" task type tells VS Code to run a container based on the image built in the previous task.
+      // Under the hood, it executes a "docker run" command with the specified parameters.
+      "type": "docker-run",
+
+      // This label is used to reference this task (for example, in launch.json as the preLaunchTask).
+      // It is user-defined. You can call it whatever you want, but it should match what you call in launch.json.
+      "label": "docker-run: debug",
+
+      // "dependsOn" ensures that the docker-build task runs first, so that the latest image is available.
+      "dependsOn": ["docker-build"],
+
+      // The "python" section is a hint to the Docker extension that you want to debug a Python file.
+      // This causes the extension to automatically inject debugpy into the container startup command.
+      "python": {
+        // "file" specifies the entry point of your application.
+        "file": "src/main.py"
+      },
+
+      // The "dockerRun" section provides additional arguments to the underlying "docker run" command.
+      "dockerRun": {
+        // "capAdd": adds extra capabilities to the container; "SYS_PTRACE" is needed so that a debugger can attach.
+        "capAdd": ["SYS_PTRACE"],
+
+        // "securityOpt" modifies the security settings. "seccomp=unconfined" relaxes default restrictions,
+        // allowing debug operations that might otherwise be blocked.
+        "securityOpt": ["seccomp=unconfined"],
+
+        // "volumes" here tells Docker to mount host directories into the container.
+        "volumes": [
+          {
+            // "localPath" is the path on your host machine (your current workspace).
+            "localPath": "${workspaceFolder}",
+
+            // "containerPath" is the path inside the container where the local directory is mounted.
+            // This means any files written to /app in the container are saved on your host.
+            "containerPath": "/app"
+          }
+        ]
+      }
+    }
+  ]
+}

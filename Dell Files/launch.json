@@ -1,0 +1,45 @@
+//.vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // "name" is the friendly name displayed in VSCode's debug panel.
+      "name": "Docker: Python - General",
+
+      // "type": "docker" tells VSCode to use the Docker extension for launching the debug session.
+      // This implies that the Docker extension will manage container creation and debugging.
+      "type": "docker",
+
+      // "request": "launch" indicates that this configuration will launch a new debug session.
+      "request": "launch",
+
+      // "preLaunchTask" specifies a task to run before the debugger starts.
+      // Here, it refers to the "docker-run: debug" task in your tasks.json.
+      "preLaunchTask": "docker-run: debug",
+
+      // The "python" block provides Python-specific settings for debugging.
+      "python": {
+
+        // "pathMappings" is used to map local file paths (on your host) to remote paths (inside the container).
+        // This ensures breakpoints and file references work correctly.
+        "pathMappings": [
+          {
+            // "localRoot" is your workspace folder on the host.
+            "localRoot": "${workspaceFolder}",
+
+            // "remoteRoot" is the corresponding directory inside the Docker container.
+            "remoteRoot": "/app"
+          }
+        ],
+
+        // "projectType" provides a hint to the debugger about the kind of Python project.
+        // "general" means itï¿½s not tied to any specific framework.
+        "projectType": "general",
+        
+        // "justMyCode": false tells the debugger to step into all code, including libraries.
+        // Setting this to false is useful if you need to debug third-party or framework code.
+        "justMyCode": false
+      }
+    }
+  ]
+}

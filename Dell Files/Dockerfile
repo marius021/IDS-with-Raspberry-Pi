@@ -7,29 +7,29 @@ ENV PYTHONDONTWRITEBYCODE=1
 ENV PYTHONUNBUFFERED=1
 
 #install system dependencies
-RUN apt-get update && \
-    apt-get install -y \
-        python3.10 \
-        python3.10-dev \
-        python3.10-venv \
-        python3.10-distutils \
-        python3-pip \
-        python3-tk \
-        build-essential \
-        liblapack-dev \
-        libatlas-base-dev \
-        gcc \
-        curl \
-        git \
-        graphviz \
-        libgraphviz-dev \
-        libgli-mesa-glx \
-        pkg-config \
-        lsb-release \
-        bsdmainutils \ 
-        # Gstreaemer not needed, just in case
-        libgstreamer1.0-0 \
-        libgstreamer-plugins-base1.0-0 && \
+# install system dependencies
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
+    python3.10-distutils \
+    python3-pip \
+    python3-tk \
+    build-essential \
+    liblapack-dev \
+    libatlas-base-dev \
+    gcc \
+    curl \
+    git \
+    graphviz \
+    libgraphviz-dev \
+    libgl1 \
+    pkg-config \
+    lsb-release \
+    bsdmainutils \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 && \
     rm -rf /var/lib/apt/lists/*
     
 # Upgrade pip, setuptools, and wheel
@@ -48,18 +48,18 @@ ENV VIRTUAL_ENV=/venv
 ENV PATH="/venv/bin:/opt/hailo/usr/bin:$PATH"
 
 # Copy the Hailo Dataflow Compiler wheel into the image and install it in the venv
-COPY hailo_dataflow_compiler-3.30.0-py3-none-linux_x86_64.whl /tmp/
-RUN pip install /tmp/hailo_dataflow_compiler-3.30.0-py3-none-linux_x86_64.whl
+COPY hailo_dataflow_compiler-3.32.0-py3-none-linux_x86_64.whl /tmp/
+RUN pip install /tmp/hailo_dataflow_compiler-3.32.0-py3-none-linux_x86_64.whl
 
 # Install the pre-built HailoRT deb package (runtime only)
 # Note dkpg will not work here, because the post-install scripts inside the .deb cannot run during Docker build.
 # We are putting it here in a non-standard location
-COPY hailort_4.20.0_amd64.deb /tmp/
-RUN mkdir -p /opt/hailo && dpkg-deb -x /tmp/hailort_4.20.0_amd64.deb /opt/hailo
+COPY hailort_4.22.0_amd64.deb /tmp/
+RUN mkdir -p /opt/hailo && dpkg-deb -x /tmp/hailort_4.22.0_amd64.deb /opt/hailo
 
 # Create symlinks for hailortcli and the library
 RUN ln -s /opt/hailo/usr/bin/hailortcli /usr/bin/hailortcli && \
-    ln -s /opt/hailo/usr/lib/libhailort.so.4.20.0 /usr/lib/libhailort.so
+    ln -s /opt/hailo/usr/lib/libhailort.so.4.22.0 /usr/lib/libhailort.so
 
 # Switch to root temporarily to set up permissions for the SDK client directory
 USER root
