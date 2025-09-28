@@ -1,0 +1,7 @@
+numpy
+pandas
+joblib
+scikit-learn==1.7.1
+onnx
+onnxruntime==1.16.3
+torch==2.3.1

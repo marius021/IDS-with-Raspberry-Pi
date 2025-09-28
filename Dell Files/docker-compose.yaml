@@ -1,12 +1,40 @@
-# docker-compose.yaml
-
-version: '3.9'
-
 services:
-  app:
-    image: my_image:latest
+  train:
     build:
-      context: .
+      context: /home/dell/Desktop/Hailo-Flow
       dockerfile: Dockerfile
+    image: ids-pipeline:latest
+    container_name: ids-train
+    working_dir: /app
+    # monteaza proiectul ï¿½n /app (include cod + data + artifacts)
     volumes:
-      - .:/app
+      - /home/dell/Desktop/Hailo-Flow:/app
+    # ruleaza training-ul (ajusteaza calea dataset-ului daca alta structura)
+    command: >
+      python csv-preprocessing.py
+      --data-dir /app/GeneratedLabelledFlows
+      --epochs 6
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=UTF-8    
+
+  infer:
+    image: ids-pipeline:latest
+    container_name: ids-infer
+    depends_on:
+      - train
+    working_dir: /app
+    # ignora ENTRYPOINT-ul din Dockerfile ca sa ruleze exact "command"
+    entrypoint: ""
+    volumes:
+      - /home/dell/Desktop/Hailo-Flow:/app
+    command: >
+      python ids_inference.py
+      --input /app/data/sample.csv
+      --model /app/artifacts/ids_mlp_binary.onnx
+      --scaler /app/artifacts/scaler.joblib
+      --features /app/artifacts/feature_names.npy
+      --mode binary
+      --out /app/artifacts/preds.csv
+    environment:
+      - PYTHONUNBUFFERED=1
