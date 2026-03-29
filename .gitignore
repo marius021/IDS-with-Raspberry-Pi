@@ -1,2 +1,7 @@
 # se ignora directorul care contine dataset-ul 
 Dataset CICIDS2017/
+.venv-hailort/bin
+.venv-hailort/lib
+.venv-hailort/include
+.venv-hailort/lib64
+.codex
