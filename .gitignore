@@ -1,7 +1,20 @@
-# se ignora directorul care contine dataset-ul 
+# se ignora directorul care contine dataset-ul
 Dataset CICIDS2017/
-.venv-hailort/bin
-.venv-hailort/lib
-.venv-hailort/include
-.venv-hailort/lib64
+
+# local tooling
 .codex
+.venv-hailort/
+venv_ids/
+
+# python cache
+__pycache__/
+*.py[cod]
+
+# logs and generated runtime outputs
+*.log
+ids/preds.csv
+ids_test/alerts.log
+ids_test/live_sample.csv
+
+# large/local test data
+ids_test/sample_big.csv
