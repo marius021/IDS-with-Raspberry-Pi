@@ -13,3 +13,9 @@
       -Loads feature_names.npy, scaler.joblib, ONNX model.
       -Cleans up numbers (inf/NaN/outliers), aligns columns exactly as in training.
       -Runs inference in small batches, writes an alert log.
+
+===== UPDATE 2.04.2026 ====
+* IPS and IDS WORKS, WITHOUT HAILO
+*WORK IN PROGRESS:
+  - Hailo implementation and test
+  - Simulate on larger CSV
