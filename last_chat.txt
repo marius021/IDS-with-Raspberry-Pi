@@ -1,145 +1,57 @@
-(hailo_env) dell@Latitude-3470:~/Desktop/IDS-with-Raspberry-Pi/ids_test$ hailo compiler ids_mlp_binary.onnx --hw-arch hailo8
-[info] No GPU chosen and no suitable GPU found, falling back to CPU.
-[info] Current Time: 12:03:33, 04/05/26
-[info] CPU: Architecture: x86_64, Model: Intel(R) Core(TM) i5-6200U CPU @ 2.30GHz, Number Of Cores: 4, Utilization: 4.0%
-[info] Memory: Total: 15GB, Available: 10GB
-[info] System info: OS: Linux, Kernel: 6.17.0-19-generic
-[info] Hailo DFC Version: 3.33.0
-[info] HailoRT Version: Not Installed
-[info] PCIe: No Hailo PCIe device was found
-[info] Running hailo compiler ids_mlp_binary.onnx --hw-arch hailo8
-Traceback (most recent call last):
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/bin/hailo", line 6, in <module>
-    sys.exit(main())
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/cmd_utils/main.py", line 111, in main
-    ret_val = client_command_runner.run()
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/cmd_utils/base_utils.py", line 68, in run
-    return self._run(argv)
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/cmd_utils/base_utils.py", line 89, in _run
-    return args.func(args)
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/compiler_cli.py", line 52, in run
-    self._compile(
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/compiler_cli.py", line 72, in _compile
-    runner = self._initialize_runner(model_path, quantized_weights_path, hw_arch)
-  File "/home/dell/Desktop/IDS-with-Raspberry-Pi/hailo_env/lib/python3.10/site-packages/hailo_sdk_client/tools/compiler_cli.py", line 120, in _initialize_runner
-    raise CompilerCLIException("The given model must be a valid HAR file")
-hailo_sdk_client.tools.compiler_cli.CompilerCLIException: The given model must be a valid HAR file
+Ce face
+folosește ids_mlp_binary.hef în loc de ONNX;
+păstrează aceeași logică de:
+monitorizare CSV live,
+preprocessing,
+scalare,
+detectare src ip,
+alerts.log,
+actions.log,
+iptables,
+--dry-run,
+deduplicare.
+Înainte să-l rulezi
 
-Da — eroarea e clară și, de fapt, e un progres bun.
-
-Ce înseamnă eroarea
-
-Comanda ta:
-
-hailo compiler ids_mlp_binary.onnx --hw-arch hailo8
-
-dă:
-
-The given model must be a valid HAR file
-
-Asta înseamnă că, în DFC 3.33.0, hailo compiler nu compilează direct din ONNX.
-El așteaptă un fișier intermediar:
-
-.har
-
-Deci flow-ul corect este:
-
-ONNX -> HAR -> HEF
-
-Nu direct:
-
-ONNX -> HEF
-Ce e important de știut
-
-Liniile astea:
-
-HailoRT Version: Not Installed
-PCIe: No Hailo PCIe device was found
-
-nu sunt problema pe Dell.
-
-Pe PC-ul de compilare:
-
-nu ai nevoie de HailoRT
-nu ai nevoie să fie conectat modulul Hailo
-nu ai nevoie de accelerator PCIe
-
-Totul e ok până aici. Problema este doar formatul de intrare pentru compiler.
-
-Fluxul corect pentru Hailo 8
-Pasul 1: parsezi ONNX-ul în HAR
-
-Încearcă:
-
-hailo parser onnx ids_mlp_binary.onnx --hw-arch hailo8
-
-Asta ar trebui să genereze un fișier .har.
-
-Foarte probabil vei obține ceva de genul:
-
-ids_mlp_binary.har
-
-sau un nume derivat automat.
-
-Pasul 2: compilezi HAR-ul în HEF
-
-După ce ai HAR-ul:
-
-hailo compiler ids_mlp_binary.har --hw-arch hailo8
-
-Asta ar trebui să genereze:
+Pe Raspberry, asigură-te că ai:
 
 ids_mlp_binary.hef
-Dacă parser-ul cere explicit noduri de intrare/ieșire
+scaler.joblib
+feature_names.npy
+live_sample.csv
+binding-urile Python HailoRT (hailo_platform)
+Primul test recomandat
 
-La unele modele ONNX, hailo parser poate să ceară:
+Mai întâi tot în dry-run:
 
-input node
-output node
+cd /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test
+source venv_ids/bin/activate
 
-În cazul tău, modelul a fost exportat cu:
+python ips_hailo.py \
+  --input /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/live_sample.csv \
+  --hef /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/ids_mlp_binary.hef \
+  --scaler /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/scaler.joblib \
+  --features /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/feature_names.npy \
+  --alert-log /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/alerts_hailo.log \
+  --action-log /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test/actions_hailo.log \
+  --threshold 0.01 \
+  --poll 2 \
+  --batch 32 \
+  --dry-run \
+  --debug
+Ce vrem să vedem
+scriptul pornește fără eroare la importul hailo_platform;
+afișează stream-urile Hailo;
+procesează batch-urile;
+produce [ALERT] și [IPS] DRY-RUN would block ... similar cu versiunea CPU.
+Important
 
-input: input
-output: prob
+API-ul Python Hailo diferă puțin între versiuni. Dacă apare o eroare la:
 
-Deci, dacă parser-ul se plânge, încearcă:
+ConfigureParams
+InputVStreamParams
+InferVStreams
+activate(...)
 
-hailo parser onnx ids_mlp_binary.onnx --hw-arch hailo8 --start-node-names input --end-node-names prob
-Ce e posibil să apară după parser
+atunci nu înseamnă că abordarea e greșită, ci doar că trebuie adaptată 2-3 linii la versiunea exactă a binding-urilor de pe Raspberry.
 
-Pentru unele modele, flow-ul complet Hailo este:
-
-ONNX -> HAR -> optimize -> compile -> HEF
-
-adică:
-
-parser
-optimize
-compiler
-
-Dacă parser-ul merge, dar compiler-ul se plânge că HAR-ul nu e optimizat/quantized, atunci va trebui să introducem și pasul de optimize.
-
-În acel caz, următorul lanț va fi ceva de genul:
-
-hailo parser onnx ids_mlp_binary.onnx --hw-arch hailo8
-hailo optimize ids_mlp_binary.har --hw-arch hailo8
-hailo compiler ids_mlp_binary.har --hw-arch hailo8
-
-Dar nu vreau să ghicim înainte să vedem output-ul parser-ului.
-
-Ce să faci acum
-
-Rulează exact asta:
-
-hailo parser onnx ids_mlp_binary.onnx --hw-arch hailo8
-
-și trimite-mi output-ul complet.
-
-Dacă merge, trecem imediat la compiler.
-Dacă nu merge, îți spun exact:
-
-ce noduri trebuie date,
-dacă trebuie optimize,
-și cum ajungem la .hef.
-
-Suntem foarte aproape.
+Dacă îl rulezi și îmi dai output-ul din terminal, îți spun imediat ce ajustare trebuie făcută și îl aducem la o versiune funcțional
