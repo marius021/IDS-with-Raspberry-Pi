@@ -4,6 +4,8 @@ Dataset CICIDS2017/
 # local tooling
 .codex
 .venv-hailort/
+.hailo_env/
+hailo_env/
 venv_ids/
 
 # python cache
