@@ -12,6 +12,10 @@ venv_ids/
 __pycache__/
 *.py[cod]
 
+# keep Hailo artifacts under version control
+!*.har
+!*.hef
+
 # logs and generated runtime outputs
 *.log
 ids/preds.csv
