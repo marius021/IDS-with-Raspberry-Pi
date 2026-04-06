@@ -7,6 +7,7 @@ Dataset CICIDS2017/
 .hailo_env/
 hailo_env/
 venv_ids/
+ids_test/venv_hailo_runtime/
 
 # python cache
 __pycache__/

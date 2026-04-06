@@ -4,19 +4,17 @@
 """
 ips_hailo.py
 
-Prima versiune de IPS cu backend Hailo (HEF), construită peste logica validată deja:
-- monitorizează un CSV care crește
-- încarcă scaler.joblib + feature_names.npy
-- pregătește aceleași features ca la training
-- rulează inferența pe acceleratorul Hailo
+IPS + IDS cu Hailo HEF, fără scikit-learn la runtime.
+
+Funcții:
+- monitorizează un CSV care crește în timp
+- încarcă scaler_params.npz
+- încarcă lista de feature-uri din txt/json/csv/npy
+- face preprocessing numeric
+- rulează inferența pe Hailo
 - scrie alerts.log și actions.log
 - poate bloca IP-uri cu iptables
-- suportă --dry-run pentru testare sigură
-
-Notă:
-API-ul Python HailoRT diferă puțin între versiuni. Scriptul încearcă să folosească
-binding-urile uzuale (`hailo_platform`). Dacă pe Raspberry ai altă versiune,
-zona care poate necesita ajustări minime este doar clasa HailoRunner.
+- suportă --dry-run pentru test sigur
 """
 
 import time
@@ -24,11 +22,10 @@ import json
 import argparse
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import numpy as np
 import pandas as pd
-import joblib
 
 # -------- Hailo imports --------
 try:
@@ -50,13 +47,12 @@ except Exception as e:
     )
 
 # ---------- Config implicită ----------
-DEFAULT_BASE = Path.home() / "ids"
+DEFAULT_BASE = Path.home() / "Desktop" / "IDS-with-Raspberry-Pi" / "ids_test"
 DEFAULT_INPUT = DEFAULT_BASE / "live_sample.csv"
 DEFAULT_HEF = DEFAULT_BASE / "ids_mlp_binary.hef"
-DEFAULT_SCALER = DEFAULT_BASE / "scaler.joblib"
-DEFAULT_FEATS = DEFAULT_BASE / "feature_names.npy"
-DEFAULT_ALERT_LOG = DEFAULT_BASE / "alerts.log"
-DEFAULT_ACTION_LOG = DEFAULT_BASE / "actions.log"
+DEFAULT_SCALER = DEFAULT_BASE / "scaler_params.npz"
+DEFAULT_ALERT_LOG = DEFAULT_BASE / "alerts_hailo.log"
+DEFAULT_ACTION_LOG = DEFAULT_BASE / "actions_hailo.log"
 
 POLL_SEC = 3
 THRESHOLD = 0.5
@@ -73,6 +69,129 @@ DEFAULT_WHITELIST = {
 }
 
 
+# ---------- Loader scaler ----------
+def load_scaler_params(npz_path: Path):
+    data = np.load(npz_path)
+    return {
+        "mean": data["mean"].astype(np.float32),
+        "scale": data["scale"].astype(np.float32),
+        "with_mean": bool(int(data["with_mean"][0])),
+        "with_std": bool(int(data["with_std"][0])),
+        "n_features_in": int(data["n_features_in"][0]),
+    }
+
+
+def apply_standard_scaler(X: np.ndarray, scaler_params) -> np.ndarray:
+    X = np.asarray(X, dtype=np.float32)
+    out = X.copy()
+
+    if scaler_params["with_mean"]:
+        out = out - scaler_params["mean"]
+
+    if scaler_params["with_std"]:
+        scale = scaler_params["scale"].copy()
+        scale[scale == 0] = 1.0
+        out = out / scale
+
+    return np.ascontiguousarray(out, dtype=np.float32)
+
+
+# ---------- Loader feature names ----------
+def resolve_features_path(user_arg: Optional[str], base_dir: Path) -> Path:
+    if user_arg:
+        p = Path(user_arg).expanduser()
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"Fișierul de feature names nu există: {p}")
+
+    candidates = [
+        base_dir / "feature_names.txt",
+        base_dir / "feature_names.json",
+        base_dir / "feature_names.csv",
+        base_dir / "feature_names_safe.npy",
+        base_dir / "feature_names.npy",
+        base_dir / "feature_names copy.npy",
+    ]
+
+    for p in candidates:
+        if p.exists():
+            return p
+
+    raise FileNotFoundError(
+        "Nu am găsit fișierul cu feature names.\n"
+        "Am căutat: feature_names.txt, feature_names.json, feature_names.csv, "
+        "feature_names_safe.npy, feature_names.npy, feature_names copy.npy"
+    )
+
+
+def load_feature_names(feats_path: Path) -> List[str]:
+    feats_path = Path(feats_path)
+    suffix = feats_path.suffix.lower()
+
+    if suffix in [".txt", ".lst"]:
+        lines = feats_path.read_text(encoding="utf-8").splitlines()
+        feats = [line.strip().lower() for line in lines if line.strip()]
+        if not feats:
+            raise RuntimeError(f"Fișierul {feats_path} este gol.")
+        return feats
+
+    if suffix == ".json":
+        obj = json.loads(feats_path.read_text(encoding="utf-8"))
+        if isinstance(obj, list):
+            feats = [str(x).strip().lower() for x in obj if str(x).strip()]
+            if not feats:
+                raise RuntimeError(f"Fișierul JSON {feats_path} este gol.")
+            return feats
+        if isinstance(obj, dict) and "features" in obj and isinstance(obj["features"], list):
+            feats = [str(x).strip().lower() for x in obj["features"] if str(x).strip()]
+            if not feats:
+                raise RuntimeError(f"Fișierul JSON {feats_path} nu conține feature-uri valide.")
+            return feats
+        raise RuntimeError(f"Fișierul JSON {feats_path} nu are format valid.")
+
+    if suffix == ".csv":
+        raw = feats_path.read_text(encoding="utf-8").splitlines()
+        feats = []
+        for line in raw:
+            line = line.strip()
+            if not line:
+                continue
+            # ia prima valoare de pe linie
+            first = line.split(",")[0].strip().strip('"').strip("'")
+            if first.lower() not in {"feature", "features", "name"}:
+                feats.append(first.lower())
+        if not feats:
+            raise RuntimeError(f"Fișierul CSV {feats_path} este gol sau invalid.")
+        return feats
+
+    if suffix == ".npy":
+        # Întâi încercare fără pickle
+        try:
+            arr = np.load(feats_path, allow_pickle=False)
+            return [str(x).strip().lower() for x in arr.tolist()]
+        except Exception:
+            pass
+
+        # Apoi încercare cu pickle
+        try:
+            arr = np.load(feats_path, allow_pickle=True)
+            return [str(x).strip().lower() for x in arr.tolist()]
+        except Exception as e:
+            raise RuntimeError(
+                f"Nu am putut încărca {feats_path}.\n"
+                f"Eroare: {e}\n"
+                "Dacă vezi ceva de forma `No module named numpy._core`, "
+                "înseamnă că fișierul .npy a fost salvat cu altă versiune majoră de NumPy.\n"
+                "Soluția sigură este să convertești lista de features în `feature_names.txt` pe PC "
+                "și să rulezi scriptul cu acel fișier."
+            )
+
+    raise RuntimeError(
+        f"Extensie neacceptată pentru feature names: {feats_path.suffix}\n"
+        "Folosește .txt / .json / .csv / .npy"
+    )
+
+
 # ---------- Hailo backend ----------
 class HailoRunner:
     def __init__(self, hef_path: Path):
@@ -85,7 +204,6 @@ class HailoRunner:
         )
         configured = self.device.configure(self.hef, configure_params)
 
-        # API-urile Hailo pot întoarce listă sau single object; normalizăm.
         if isinstance(configured, (list, tuple)):
             self.network_group = configured[0]
         else:
@@ -93,12 +211,26 @@ class HailoRunner:
 
         self.network_group_params = self.network_group.create_params()
 
-        self.input_vstream_params = InputVStreamParams.make(
-            self.network_group, format_type=FormatType.FLOAT32
-        )
-        self.output_vstream_params = OutputVStreamParams.make(
-            self.network_group, format_type=FormatType.FLOAT32
-        )
+        try:
+            self.input_vstream_params = InputVStreamParams.make_from_network_group(
+                self.network_group,
+                quantized=False,
+                format_type=FormatType.FLOAT32
+            )
+            self.output_vstream_params = OutputVStreamParams.make_from_network_group(
+                self.network_group,
+                quantized=False,
+                format_type=FormatType.FLOAT32
+            )
+        except Exception:
+            self.input_vstream_params = InputVStreamParams.make(
+                self.network_group,
+                format_type=FormatType.FLOAT32
+            )
+            self.output_vstream_params = OutputVStreamParams.make(
+                self.network_group,
+                format_type=FormatType.FLOAT32
+            )
 
         self.input_infos = self.hef.get_input_vstream_infos()
         self.output_infos = self.hef.get_output_vstream_infos()
@@ -108,32 +240,59 @@ class HailoRunner:
         if not self.output_infos:
             raise RuntimeError("HEF-ul nu are output vstreams.")
 
-        self.input_name = self.input_infos[0].name
-        self.output_name = self.output_infos[0].name
+        self.input_info = self.input_infos[0]
+        self.output_info = self.output_infos[0]
+
+        self.input_name = self.input_info.name
+        self.output_name = self.output_info.name
+
+        self.input_shape = tuple(self.input_info.shape)
+        self.output_shape = tuple(self.output_info.shape)
+
+        self.input_features = int(np.prod(self.input_shape)) if len(self.input_shape) > 0 else 1
+
+    def _prepare_input(self, Xs: np.ndarray) -> np.ndarray:
+        Xs = np.asarray(Xs, dtype=np.float32)
+        Xs = np.ascontiguousarray(Xs)
+
+        if Xs.ndim != 2:
+            raise RuntimeError(f"Xs trebuie să aibă shape (batch, features), primit: {Xs.shape}")
+
+        if Xs.shape[1] != self.input_features:
+            raise RuntimeError(
+                f"Număr greșit de features. Modelul așteaptă {self.input_features}, "
+                f"dar batch-ul are {Xs.shape[1]}. HEF input shape = {self.input_shape}"
+            )
+
+        if len(self.input_shape) <= 1:
+            return Xs
+
+        return np.ascontiguousarray(
+            Xs.reshape((Xs.shape[0],) + self.input_shape),
+            dtype=np.float32
+        )
 
     def infer(self, Xs: np.ndarray) -> np.ndarray:
-        """
-        Xs: (batch, n_features), float32
-        Returnează probabilități (batch,)
-        """
-        Xs = np.asarray(Xs, dtype=np.float32)
+        input_tensor = self._prepare_input(Xs)
 
-        with InferVStreams(
-            self.network_group,
-            self.input_vstream_params,
-            self.output_vstream_params,
-        ) as infer_pipeline:
-            with self.network_group.activate(self.network_group_params):
-                results = infer_pipeline.infer({self.input_name: Xs})
+        with self.network_group.activate(self.network_group_params):
+            with InferVStreams(
+                self.network_group,
+                self.input_vstream_params,
+                self.output_vstream_params,
+            ) as infer_pipeline:
+                results = infer_pipeline.infer({self.input_name: input_tensor})
 
-        out = results[self.output_name]
-        out = np.asarray(out)
+        out = np.asarray(results[self.output_name])
 
-        # Normalizare shape:
-        # poate veni (B,1), (B,), sau alte variante simple
-        out = out.reshape(out.shape[0], -1) if out.ndim > 1 else out.reshape(-1, 1)
-        proba = out[:, 0].astype(float)
-        return proba
+        if out.ndim == 0:
+            return np.array([float(out)], dtype=np.float32)
+
+        if out.ndim == 1:
+            return out.astype(np.float32)
+
+        out = out.reshape(out.shape[0], -1)
+        return out[:, 0].astype(np.float32)
 
 
 # ---------- Utilitare ----------
@@ -164,24 +323,28 @@ def detect_src_ip_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def build_feature_matrix(df: pd.DataFrame, scaler, feats_path: Path) -> np.ndarray:
+def build_feature_matrix(df: pd.DataFrame, scaler_params, wanted_features: List[str]) -> np.ndarray:
     df = normalize_columns(df)
     df_num = df.select_dtypes(include=[np.number]).copy()
     df_num = clean_numeric(df_num)
 
-    wanted = np.load(feats_path, allow_pickle=True).tolist()
-    wanted = [str(c).strip().lower() for c in wanted]
-
-    missing = [c for c in wanted if c not in df_num.columns]
+    missing = [c for c in wanted_features if c not in df_num.columns]
     if missing:
         raise RuntimeError(
             "Lipsesc coloane față de setul de antrenare: " + ", ".join(missing[:20])
         )
 
-    df_num = df_num[wanted]
+    df_num = df_num[wanted_features]
     X = df_num.values.astype(np.float32)
-    Xs = scaler.transform(X).astype(np.float32)
-    return Xs
+
+    if X.shape[1] != scaler_params["n_features_in"]:
+        raise RuntimeError(
+            f"Scalerul așteaptă {scaler_params['n_features_in']} features, "
+            f"dar batch-ul are {X.shape[1]}"
+        )
+
+    Xs = apply_standard_scaler(X, scaler_params)
+    return np.ascontiguousarray(Xs, dtype=np.float32)
 
 
 def run_batch_hailo(runner: HailoRunner, Xs: np.ndarray, threshold: float):
@@ -326,27 +489,32 @@ def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="CSV sursă (fișier unic care crește)")
+    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="CSV sursă")
     ap.add_argument("--hef", default=str(DEFAULT_HEF), help="Model HEF Hailo")
-    ap.add_argument("--scaler", default=str(DEFAULT_SCALER), help="scaler.joblib")
-    ap.add_argument("--features", default=str(DEFAULT_FEATS), help="feature_names.npy")
-    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="fișierul de log pentru alerte")
-    ap.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG), help="fișierul de log pentru acțiuni IPS")
-    ap.add_argument("--whitelist", default="", help="fișier text cu IP-uri whitelisted, câte unul pe linie")
-    ap.add_argument("--poll", type=int, default=POLL_SEC, help="interval de poll (sec)")
-    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="mărimea batch-ului")
-    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="prag binary pentru ATTACK")
-    ap.add_argument("--dry-run", action="store_true", help="nu aplică iptables, doar loghează ce ar fi blocat")
-    ap.add_argument("--debug", action="store_true", help="afișează mesaje de debug")
+    ap.add_argument("--scaler", default=str(DEFAULT_SCALER), help="scaler_params.npz")
+    ap.add_argument(
+        "--features",
+        default="",
+        help="fișier cu feature names (.txt/.json/.csv/.npy). Dacă lipsește, scriptul caută automat."
+    )
+    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="log alerte")
+    ap.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG), help="log acțiuni IPS")
+    ap.add_argument("--whitelist", default="", help="fișier text cu IP-uri whitelisted")
+    ap.add_argument("--poll", type=int, default=POLL_SEC, help="interval poll (sec)")
+    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="mărime batch")
+    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="prag binary")
+    ap.add_argument("--dry-run", action="store_true", help="nu aplică iptables")
+    ap.add_argument("--debug", action="store_true", help="afișează debug")
     args = ap.parse_args()
 
-    input_csv = Path(args.input)
-    hef_p = Path(args.hef)
-    scaler_p = Path(args.scaler)
-    feats_p = Path(args.features)
-    alert_log = Path(args.alert_log)
-    action_log = Path(args.action_log)
-    whitelist_path = Path(args.whitelist) if args.whitelist else None
+    input_csv = Path(args.input).expanduser()
+    hef_p = Path(args.hef).expanduser()
+    scaler_p = Path(args.scaler).expanduser()
+    base_dir = input_csv.parent
+    feats_p = resolve_features_path(args.features, base_dir)
+    alert_log = Path(args.alert_log).expanduser()
+    action_log = Path(args.action_log).expanduser()
+    whitelist_path = Path(args.whitelist).expanduser() if args.whitelist else None
 
     if not hef_p.exists():
         raise FileNotFoundError(f"HEF-ul nu există: {hef_p}")
@@ -356,7 +524,8 @@ def main():
         raise FileNotFoundError(f"Feature list nu există: {feats_p}")
 
     whitelist = load_whitelist(whitelist_path)
-    scaler = joblib.load(scaler_p)
+    scaler = load_scaler_params(scaler_p)
+    wanted_features = load_feature_names(feats_p)
     runner = HailoRunner(hef_p)
 
     last_seen = 0
@@ -367,10 +536,15 @@ def main():
         f"batch={args.batch} | threshold={args.threshold} | dry_run={args.dry_run}"
     )
     print(f"[INFO] HEF: {hef_p}")
+    print(f"[INFO] Scaler params: {scaler_p}")
+    print(f"[INFO] Features file: {feats_p}")
+    print(f"[INFO] Număr features așteptate: {len(wanted_features)}")
     print(f"[INFO] Log alerte: {alert_log}")
     print(f"[INFO] Log acțiuni: {action_log}")
     print(f"[INFO] Whitelist size: {len(whitelist)}")
     print(f"[INFO] Hailo input stream: {runner.input_name} | output stream: {runner.output_name}")
+    print(f"[INFO] Hailo input shape: {runner.input_shape}")
+    print(f"[INFO] Hailo output shape: {runner.output_shape}")
 
     while True:
         if input_csv.exists():
@@ -403,8 +577,21 @@ def main():
                         if args.debug:
                             print(f"[DEBUG] procesez chunk {start}:{start + len(chunk)}")
 
-                        Xs = build_feature_matrix(chunk, scaler, feats_p)
+                        Xs = build_feature_matrix(chunk, scaler, wanted_features)
+
+                        if args.debug:
+                            print(f"[DEBUG] Xs shape={Xs.shape} dtype={Xs.dtype} bytes={Xs.nbytes}")
+
                         prob, pred = run_batch_hailo(runner, Xs, args.threshold)
+
+                        if args.debug and start == 0:
+                            print("[DEBUG] first 8 hailo outputs:", prob[:8])
+                            print("[DEBUG] hailo min/max:", float(prob.min()), float(prob.max()))
+                            print("[DEBUG] hailo dtype:", prob.dtype)
+
+                        if args.debug and start == 0:
+                            print("[DEBUG] first 8 raw outputs:", prob[:8])
+                            print("[DEBUG] raw min/max:", float(prob.min()), float(prob.max()))
 
                         if args.debug:
                             print(
@@ -413,12 +600,15 @@ def main():
                             )
 
                         append_alerts(chunk, prob, pred, alert_log)
-                        append_actions(chunk, prob, pred, src_ip_col, action_log,
-                                       whitelist, args.dry_run, seen_cache, args.debug)
+                        append_actions(
+                            chunk, prob, pred, src_ip_col, action_log,
+                            whitelist, args.dry_run, seen_cache, args.debug
+                        )
 
                     last_seen = n
                 else:
-                    print("[DEBUG] Nicio linie noua de procesat.")
+                    if args.debug:
+                        print("[DEBUG] Nicio linie nouă de procesat.")
             except Exception as e:
                 print(f"[WARN] Eroare la procesare: {e}")
         else:
