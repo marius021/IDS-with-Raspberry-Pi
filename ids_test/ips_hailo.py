@@ -347,8 +347,13 @@ def build_feature_matrix(df: pd.DataFrame, scaler_params, wanted_features: List[
     return np.ascontiguousarray(Xs, dtype=np.float32)
 
 
-def run_batch_hailo(runner: HailoRunner, Xs: np.ndarray, threshold: float):
-    proba = runner.infer(Xs)
+def sigmoid(x):
+    x = np.clip(x, -40.0, 40.0)
+    return 1.0 / (1.0 + np.exp(-x))
+
+def run_batch_hailo(runner, Xs, threshold):
+    logits = runner.infer(Xs)
+    proba = sigmoid(logits).astype(np.float32)
     pred = (proba >= threshold).astype(int)
     return proba, pred
 
