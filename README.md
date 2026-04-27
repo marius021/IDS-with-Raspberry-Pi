@@ -19,3 +19,11 @@
 *WORK IN PROGRESS:
   - Hailo implementation and test
   - Simulate on larger CSV
+ 
+===== UPDATE 10.04.2026 =====
+What works
+* Raspberry + Hailo pipeline runs without errors
+* HEF loads, preprocessing is correct, inference processes all batches
+* Input shape Hailo: (1, 1, 80), output: ids_mlp_binary_logits/fc1
+* Attacks detected at --threshold 0.005
+* IPS with iptables blocking working in --dry-run
