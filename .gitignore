@@ -13,8 +13,7 @@ ids_test/venv_hailo_runtime/
 __pycache__/
 *.py[cod]
 
-# keep Hailo artifacts under version control
-!*.har
+# keep compiled Hailo models under version control
 !*.hef
 
 # logs and generated runtime outputs
@@ -25,3 +24,4 @@ ids_test/live_sample.csv
 
 # large/local test data
 ids_test/sample_big.csv
+ids_test/sample_labeled.csv
