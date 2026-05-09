@@ -4,6 +4,170 @@
   "n_rows": 3672,
   "threshold": 0.5,
   "sigmoid_applied": true,
+  "raw_out": {
+    "min": -570.7951049804688,
+    "max": -4.837246894836426,
+    "mean": -34.38897705078125,
+    "std": 35.96965789794922
+  },
+  "inference_sec": 0.705,
+  "rows_per_sec": 5208.1,
+  "hailo_metrics": {
+    "tp": 0,
+    "fp": 0,
+    "tn": 1836,
+    "fn": 1836,
+    "accuracy": 0.5,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0
+  },
+  "hailo_sweep": [
+    {
+      "threshold": 0.001,
+      "tp": 2,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1834,
+      "accuracy": 0.5005,
+      "precision": 1.0,
+      "recall": 0.0011,
+      "f1": 0.0022
+    },
+    {
+      "threshold": 0.005,
+      "tp": 2,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1834,
+      "accuracy": 0.5005,
+      "precision": 1.0,
+      "recall": 0.0011,
+      "f1": 0.0022
+    },
+    {
+      "threshold": 0.01,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.02,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.05,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.1,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.2,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.3,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.4,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.5,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.6,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.7,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "threshold": 0.9,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1836,
+      "fn": 1836,
+      "accuracy": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  ],
+  "hailo_best_threshold": 0.001,
   "onnx_metrics": {
     "tp": 1394,
     "fp": 9,
@@ -159,5 +323,7 @@
       "f1": 0.7855
     }
   ],
-  "onnx_best_threshold": 0.001
+  "onnx_best_threshold": 0.001,
+  "hailo_onnx_agreement": 2269,
+  "hailo_onnx_agreement_pct": 61.79
 }

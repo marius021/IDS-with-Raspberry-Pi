@@ -38,6 +38,7 @@ import argparse
 import json
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import List, Optional
 
@@ -152,6 +153,8 @@ def load_hailo_runner(hef_path: Path) -> dict:
     n_feats = int(np.prod(tuple(in_info.shape))) if in_info.shape else 1
 
     return {
+        "device": device,   # keep VDevice alive for the lifetime of inference
+        "hef": hef,         # keep HEF alive too
         "ng": ng,
         "ng_params": ng_params,
         "in_params": in_params,
@@ -167,17 +170,16 @@ def load_hailo_runner(hef_path: Path) -> dict:
 def hailo_infer_batch(runner: dict, Xs: np.ndarray) -> np.ndarray:
     from hailo_platform import InferVStreams
     Xs = np.ascontiguousarray(Xs, dtype=np.float32)
-    if len(runner["in_shape"]) > 1:
-        Xs = Xs.reshape((Xs.shape[0],) + runner["in_shape"])
+    single_shape = (1,) + runner["in_shape"]
+    outputs = []
     with runner["ng"].activate(runner["ng_params"]):
         with InferVStreams(runner["ng"], runner["in_params"], runner["out_params"]) as pipe:
-            results = pipe.infer({runner["in_name"]: Xs})
-    out = np.asarray(results[runner["out_name"]])
-    if out.ndim == 0:
-        return np.array([float(out)], dtype=np.float32)
-    if out.ndim == 1:
-        return out.astype(np.float32)
-    return out.reshape(out.shape[0], -1)[:, 0].astype(np.float32)
+            for i in range(len(Xs)):
+                x = Xs[i : i + 1].reshape(single_shape)
+                res = pipe.infer({runner["in_name"]: x})
+                out = np.asarray(res[runner["out_name"]])
+                outputs.append(float(out.ravel()[0]))
+    return np.array(outputs, dtype=np.float32)
 
 
 # ── Math ─────────────────────────────────────────────────────────────────────
@@ -382,7 +384,8 @@ def main():
             print(f"             Run on Raspberry Pi for the full Hailo test.")
             print(f"\n[4/5] Hailo inference skipped.")
         else:
-            print(f"      [ERROR] {e}")
+            print(f"      [ERROR] {type(e).__name__}: {e}")
+            print(traceback.format_exc())
             print(f"\n[4/5] Hailo inference failed.")
 
     # ── Results ───────────────────────────────────────────────────────────────
