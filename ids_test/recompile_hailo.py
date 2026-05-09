@@ -94,8 +94,30 @@ def build_calib_data(csv_path: Path, sp: dict, feats: list,
 
 # ── Hailo compilation pipeline ───────────────────────────────────────────────
 
+def _write_model_script(path: Path, opt_level: int) -> None:
+    """Write a Hailo .alls model script that sets compiler/quantizer optimization level.
+
+    opt_level:
+      0 → no extra params (fast, default)
+      1 → bias_correction (CPU-only, modest accuracy gain)
+      2 → adaround (needs GPU, best accuracy)
+    """
+    lines = []
+    if opt_level == 1:
+        # Bias correction runs on CPU; improves per-layer weight offsets after PTQ.
+        lines.append("quantization_param(calibration_algorithm=bias_correction)")
+        lines.append("performance_param(compiler_optimization_level=max)")
+    elif opt_level == 2:
+        # Adaround requires a GPU; falls back to bias_correction if unavailable.
+        lines.append("quantization_param(calibration_algorithm=adaround)")
+        lines.append("performance_param(compiler_optimization_level=max)")
+    else:
+        lines.append("performance_param(compiler_optimization_level=max)")
+    path.write_text("\n".join(lines) + "\n")
+
+
 def compile_hef(onnx_path: Path, calib: np.ndarray,
-                hw_arch: str, out_hef: Path) -> None:
+                hw_arch: str, out_hef: Path, opt_level: int = 1) -> None:
     from hailo_sdk_client import ClientRunner
 
     print(f"\n[1/3] Parsing ONNX → HAR  ({onnx_path.name})")
@@ -108,11 +130,20 @@ def compile_hef(onnx_path: Path, calib: np.ndarray,
     runner.save_har(str(har_parsed))
     print(f"      Saved: {har_parsed}")
 
+    # Write model script with requested optimization parameters.
+    alls_path = out_hef.with_suffix(".alls")
+    _write_model_script(alls_path, opt_level)
     print(f"\n[2/3] Optimizing (quantizing) with {len(calib)} calibration samples")
+    print(f"      opt_level={opt_level}  model_script={alls_path.name}")
     print(f"      Calibration data: shape={calib.shape} "
           f"min={calib.min():.3f} max={calib.max():.3f} mean={calib.mean():.3f}")
     runner = ClientRunner(hw_arch=hw_arch, har=str(har_parsed))
-    runner.optimize(calib)
+    try:
+        runner.optimize(calib, model_script=str(alls_path))
+    except TypeError:
+        # Older SDK builds may not accept model_script kwarg; fall back to bare call.
+        print("      [WARN] model_script kwarg not accepted — falling back to optimize(calib)")
+        runner.optimize(calib)
     har_quant = out_hef.with_suffix("").with_suffix(".quant.har")
     runner.save_har(str(har_quant))
     print(f"      Saved: {har_quant}")
@@ -140,6 +171,8 @@ def main():
                     help="Number of calibration samples (default 512)")
     ap.add_argument("--hw-arch", default="hailo8",
                     help="Hailo hardware architecture (hailo8 or hailo8l)")
+    ap.add_argument("--opt-level", type=int, default=1, choices=[0, 1, 2],
+                    help="Quantization optimization: 0=max compiler only, 1=bias correction (default, CPU-OK), 2=adaround (needs GPU)")
     ap.add_argument("--out", default="ids_mlp_binary_logits.hef",
                     help="Output HEF path (overwrites existing)")
     ap.add_argument("--seed", type=int, default=42)
@@ -173,7 +206,7 @@ def main():
     print(f"      Range : [{calib.min():.3f}, {calib.max():.3f}]")
     print(f"      Mean  : {calib.mean():.3f}  Std: {calib.std():.3f}")
 
-    compile_hef(onnx_path, calib, args.hw_arch, out_hef)
+    compile_hef(onnx_path, calib, args.hw_arch, out_hef, args.opt_level)
 
     print(f"\n{'=' * 60}")
     print(f"  Done. Copy {out_hef} to the Raspberry Pi and retest.")

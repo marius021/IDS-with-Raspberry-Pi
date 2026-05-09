@@ -1,0 +1,2 @@
+quantization_param(calibration_algorithm=bias_correction)
+performance_param(compiler_optimization_level=max)
