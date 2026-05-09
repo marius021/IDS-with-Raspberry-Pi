@@ -1,0 +1,1 @@
+timestamp,variant,batch_idx,n_rows,t_read_ms,t_preprocess_ms,t_inference_ms,t_postprocess_ms,t_log_ms,t_total_ms

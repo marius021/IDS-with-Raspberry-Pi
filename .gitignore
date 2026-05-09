@@ -25,3 +25,5 @@ ids_test/live_sample.csv
 # large/local test data
 ids_test/sample_big.csv
 ids_test/sample_labeled.csv
+ids_test/friday_ddos.csv
+

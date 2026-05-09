@@ -23,6 +23,7 @@ import argparse
 import subprocess
 from pathlib import Path
 from typing import Optional, List
+from bench_timing import StageTimer, maybe_writer
 
 import numpy as np
 import pandas as pd
@@ -551,6 +552,10 @@ def main():
     print(f"[INFO] Hailo input shape: {runner.input_shape}")
     print(f"[INFO] Hailo output shape: {runner.output_shape}")
 
+    bench = maybe_writer(default_path="timing_hailo.csv", default_variant="hailo")
+    timer = StageTimer()
+    batch_idx = 0
+
     while True:
         if input_csv.exists():
             try:
@@ -582,33 +587,36 @@ def main():
                         if args.debug:
                             print(f"[DEBUG] procesez chunk {start}:{start + len(chunk)}")
 
+                        timer.reset()
+
+                        timer.start("preprocess")
                         Xs = build_feature_matrix(chunk, scaler, wanted_features)
+                        timer.stop("preprocess")
 
-                        if args.debug:
-                            print(f"[DEBUG] Xs shape={Xs.shape} dtype={Xs.dtype} bytes={Xs.nbytes}")
-
+                        timer.start("inference")
                         prob, pred = run_batch_hailo(runner, Xs, args.threshold)
+                        timer.stop("inference")
 
-                        if args.debug and start == 0:
-                            print("[DEBUG] first 8 hailo outputs:", prob[:8])
-                            print("[DEBUG] hailo min/max:", float(prob.min()), float(prob.max()))
-                            print("[DEBUG] hailo dtype:", prob.dtype)
-
-                        if args.debug and start == 0:
-                            print("[DEBUG] first 8 raw outputs:", prob[:8])
-                            print("[DEBUG] raw min/max:", float(prob.min()), float(prob.max()))
+                        timer.start("postprocess")
+                        # sigmoid + threshold sunt deja în run_batch; aici doar marcăm
+                        n_attacks = int(pred.sum())
+                        timer.stop("postprocess")
 
                         if args.debug:
                             print(
                                 f"[DEBUG] batch rows={len(chunk)} | "
-                                f"max_prob={float(prob.max()):.6f} | attacks={int(pred.sum())}"
+                                f"max_prob={float(prob.max()):.6f} | attacks={n_attacks}"
                             )
 
+                        timer.start("log")
                         append_alerts(chunk, prob, pred, alert_log)
-                        append_actions(
-                            chunk, prob, pred, src_ip_col, action_log,
-                            whitelist, args.dry_run, seen_cache, args.debug
-                        )
+                        append_actions(chunk, prob, pred, src_ip_col, action_log,
+                                       whitelist, args.dry_run, seen_cache, args.debug)
+                        timer.stop("log")
+
+                        if bench:
+                            bench.write_batch(batch_idx, len(chunk), timer)
+                            batch_idx += 1
 
                     last_seen = n
                 else:

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import joblib
+from bench_timing import StageTimer, maybe_writer
 import onnxruntime as ort
 
 DEFAULT_BASE = Path.home() / "ids"
@@ -270,6 +271,10 @@ def main():
     print(f"[INFO] Log acțiuni: {action_log}")
     print(f"[INFO] Whitelist size: {len(whitelist)}")
 
+    bench = maybe_writer(default_path="timing_cpu.csv", default_variant="cpu")
+    timer = StageTimer()
+    batch_idx = 0
+
     while True:
         if input_csv.exists():
             try:
@@ -301,18 +306,36 @@ def main():
                         if args.debug:
                             print(f"[DEBUG] procesez chunk {start}:{start + len(chunk)}")
 
+                        timer.reset()
+
+                        timer.start("preprocess")
                         Xs = build_feature_matrix(chunk, scaler, feats_p)
+                        timer.stop("preprocess")
+
+                        timer.start("inference")
                         prob, pred = run_batch(sess, input_name, Xs, args.threshold)
+                        timer.stop("inference")
+
+                        timer.start("postprocess")
+                        # sigmoid + threshold sunt deja în run_batch; aici doar marcăm
+                        n_attacks = int(pred.sum())
+                        timer.stop("postprocess")
 
                         if args.debug:
                             print(
                                 f"[DEBUG] batch rows={len(chunk)} | "
-                                f"max_prob={float(prob.max()):.6f} | attacks={int(pred.sum())}"
+                                f"max_prob={float(prob.max()):.6f} | attacks={n_attacks}"
                             )
 
+                        timer.start("log")
                         append_alerts(chunk, prob, pred, alert_log)
                         append_actions(chunk, prob, pred, src_ip_col, action_log,
                                        whitelist, args.dry_run, seen_cache, args.debug)
+                        timer.stop("log")
+
+                        if bench:
+                            bench.write_batch(batch_idx, len(chunk), timer)
+                            batch_idx += 1
 
                     last_seen = n
                 else:
