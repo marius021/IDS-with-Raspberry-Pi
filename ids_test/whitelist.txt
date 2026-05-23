@@ -1,7 +1,15 @@
-# whitelist
+# Whitelist IPS - never block these IPs
+# Generated for thesis project
+
+# Loopback
 127.0.0.1
-192.168.1.1
-192.168.1.140
-192.168.1.139
-192.168.10.12
-192.168.10.15
+::1
+
+# Network infrastructure
+192.168.88.1
+
+# This Pi (avoid self-block)
+192.168.88.235
+
+# Workstation (Raspberry Pi Connect source + future SSH)
+192.168.88.210
