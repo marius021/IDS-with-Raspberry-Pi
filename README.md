@@ -1,10 +1,28 @@
 # IDS/IPS with Raspberry Pi + Hailo
 
-A real-time intrusion detection and prevention system built around a binary MLP model trained on CICIDS-style network flow data. The model runs on a Raspberry Pi, optionally accelerated by a Hailo-8 AI chip.
+A real-time intrusion detection and prevention system built around a binary MLP model trained on CICIDS2017 network flow data. The model runs on a Raspberry Pi 5, optionally accelerated by a Hailo-8 AI chip, and closes the full loop from packet capture to automatic blocking of malicious source IPs.
 
 **Detection backend:** ONNX Runtime (CPU) or Hailo HEF (NPU)
 **Prevention action:** `iptables DROP` on the source IP of detected attacks
-**Input:** a growing CSV of network flow features (e.g. produced by CICFlowMeter)
+**Input:** a CSV of network flow features, produced on the Pi by `pcap_to_cicids.py` (scapy-based, no external flow meter required)
+
+---
+
+## Results summary
+
+The system was validated end-to-end on a Raspberry Pi 5 + Hailo-8. Key measured results:
+
+| Metric | Value |
+|--------|-------|
+| F1 score (Hailo-8, INT8) on CICIDS2017 Friday DDoS | 99.20% |
+| F1 score (ONNX, FP32) baseline | 99.84% |
+| Quantization F1 degradation | −0.64 pp |
+| CPU usage reduction (Hailo vs ONNX, batch 32) | −71.8% |
+| Max temperature reduction (Hailo vs ONNX, batch 32) | −10.5 °C |
+| Hailo raw hardware throughput (`hailortcli benchmark`) | 56,568 inferences/s |
+| End-to-end attack test (SYN flood) | detected at prob 1.000, attacker IP blocked |
+
+The takeaway: on a small MLP (~10k parameters) the Hailo-8 does not win on raw throughput — the CPU keeps up easily — but it offloads inference almost entirely off the CPU, freeing it for capture, flow extraction, logging, and iptables, while running markedly cooler.
 
 ---
 
@@ -33,11 +51,11 @@ IDS-with-Raspberry-Pi/
 │   ├── run_scaling_v2.sh       Improved scaling benchmark: absolute paths + health checks
 │   ├── run_burst_scaling.sh    Run run_burst_bench.sh across multiple batch sizes
 │   │
-│   ├── cicfm_to_cicids.py      Map CICFlowMeter Python fork CSV → CICIDS2017 (time-unit fix)
-│   ├── cicflow_to_cicids_v2.py Map CICFlowMeter Java v4 CSV → CICIDS2017 (14 verified renames)
-│   ├── demo_phase_F1.sh        Phase F.1 demo: IPS reaction to a controlled attack CSV
+│   ├── pcap_to_cicids.py       PCAP → CICIDS2017 CSV via scapy (primary flow extractor)
 │   │
-│   ├── pcap_to_cicids.py       Phase G: PCAP → CICIDS2017 CSV via scapy (no CICFlowMeter)
+│   ├── cicfm_to_cicids.py      (legacy) Map CICFlowMeter Python fork CSV → CICIDS2017 (time-unit fix)
+│   ├── cicflow_to_cicids_v2.py (legacy) Map CICFlowMeter Java v4 CSV → CICIDS2017 (verified renames)
+│   ├── demo_phase_F1.sh        IPS reaction demo: blocking response to a controlled attack CSV
 │   │
 │   ├── validate_hailo.py       End-to-end HEF validation: F1 / threshold sweep / ONNX comparison
 │   ├── check_hailo_artifacts.py  Pre-flight check: HEF loads + I/O shapes + synthetic run
@@ -47,7 +65,7 @@ IDS-with-Raspberry-Pi/
 │   ├── ids_mlp_binary_logits.hef  Hailo HEF model (logits output, sigmoid applied in Python)
 │   ├── scaler.joblib           StandardScaler for ONNX runtime
 │   ├── scaler_params.npz       Scaler parameters for Hailo runtime (no sklearn needed)
-│   ├── feature_names.npy / .txt  Ordered list of expected input features
+│   ├── feature_names.npy / .txt  Ordered list of expected input features (80 features)
 │   ├── whitelist.txt           IPs that are never blocked
 │   ├── live_sample_bench.csv   Dedicated live CSV used exclusively by benchmark scripts
 │   ├── bench_results/          Output directory for all benchmark runs (timestamped subdirs)
@@ -57,7 +75,7 @@ IDS-with-Raspberry-Pi/
 │   ├── check_artifacts.py      Validate that model, scaler, features, and CSV are aligned
 │   ├── eval_quick.py           Print classification report from a predictions CSV
 │   └── multiclass_test.py      Inspect sample CSV columns and types
-├── Dell Files/
+├── Dev Files/
 │   ├── Dockerfile              Container image for training / development
 │   ├── docker-compose.yaml     Training and inference services
 │   ├── requirements.txt        Full dependency set (PyTorch, scikit-learn, ONNX)
@@ -76,9 +94,12 @@ IDS-with-Raspberry-Pi/
 
 | Component | Notes |
 |-----------|-------|
-| Raspberry Pi 4 or 5 | tested and confirmed working |
-| Hailo-8 M.2 / HAT | optional — enables NPU acceleration via `ips_hailo.py` |
-| Network tap / port mirror | feed live traffic to CICFlowMeter running on the Pi |
+| Raspberry Pi 5 | primary platform — tested and confirmed working |
+| Hailo-8 M.2 / AI HAT | optional — enables NPU acceleration via `ips_hailo.py` |
+| Active cooler | recommended for sustained benchmarking on the Pi 5 |
+| Ethernet (wired) | traffic is captured on the wired interface with `tcpdump`; Wi-Fi is disabled on the Pi to reduce capture noise |
+
+A second machine (the development workstation, with an NVIDIA GPU satisfying Hailo's CUDA requirements) is used for training, HEF compilation, and — in the validation experiments — as a controlled attack traffic source. It is not needed at runtime.
 
 ---
 
@@ -90,31 +111,34 @@ IDS-with-Raspberry-Pi/
 pip install -r requirements.txt
 ```
 
-Pinned versions: `numpy 2.4`, `pandas 3.0`, `onnxruntime 1.24`, `joblib 1.5`.
+> **Note:** pin the runtime dependencies to versions known to work on your Raspberry Pi OS image (numpy, pandas, onnxruntime, joblib). Verify the pinned versions in `requirements.txt` match what is actually installed before relying on them.
 
 ### Raspberry Pi (with Hailo)
 
-Install HailoRT Python bindings from the [Hailo Developer Zone](https://hailo.ai/developer-zone/) for your HailoRT version, then:
+Install HailoRT and its Python bindings from the [Hailo Developer Zone](https://hailo.ai/developer-zone/) for your HailoRT version, then:
 
 ```bash
 pip install -r requirements.txt
+pip install scapy            # required by pcap_to_cicids.py
 ```
 
-`ips_hailo.py` has no scikit-learn dependency — it uses `scaler_params.npz` directly.
+`ips_hailo.py` has no scikit-learn dependency — it uses `scaler_params.npz` directly. The only scikit-learn touchpoint on the Pi is `scaler.joblib` for the ONNX path; if used, it must match the version the scaler was created with (`scikit-learn==1.3.2`).
 
-### Dell / training machine
+### Development / training machine
 
 ```bash
-pip install -r "Dell Files/requirements.txt"
+pip install -r "Dev Files/requirements.txt"
 ```
 
-Includes PyTorch 2.3, scikit-learn 1.7, ONNX 1.x.
+Includes PyTorch, scikit-learn, and ONNX for training and compilation.
+
+> **Note:** keep the training-side scikit-learn version aligned with the one required to deserialize `scaler.joblib` on the Pi (`1.3.2`), to avoid version-mismatch warnings or subtle scaler differences.
 
 ---
 
 ## Workflow
 
-### 1 — Train a model (Dell)
+### 1 — Train a model (development machine)
 
 ```bash
 python "Debug Scripts/csv-preprocessing.py" --data /path/to/cicids_csvs/
@@ -125,7 +149,11 @@ This produces in the working directory:
 - `ids_mlp_multiclass.onnx` — attack-type classifier
 - `scaler.joblib`, `feature_names.npy`, `classes.npy`, `label_encoder.joblib`
 
-### 2 — Export artifacts for the Raspberry Pi
+### 2 — Compile the model for Hailo (development machine)
+
+Use `recompile_hailo.py` to produce the HEF with runtime-matched calibration data (see [Hailo utilities](#hailo-utilities)). This is preferred over the manual parse/optimize/compile steps because calibration quality directly affects quantization accuracy.
+
+### 3 — Export artifacts for the Raspberry Pi
 
 ```bash
 # Export scaler for the Hailo runtime (no sklearn on Pi)
@@ -135,9 +163,9 @@ python ids_test/export_scaler.py --scaler scaler.joblib --out ids_test/scaler_pa
 python ids_test/feature_names_generate.py
 ```
 
-### 3 — Copy artifacts to the Pi
+### 4 — Copy artifacts to the Pi
 
-Transfer these files to `~/ids/` on the Raspberry Pi:
+Transfer these files to `~/ids/` (or the project directory) on the Raspberry Pi:
 
 ```
 ids_mlp_binary.onnx           (CPU / ONNX runtime)
@@ -148,7 +176,7 @@ feature_names.npy or .txt
 whitelist.txt
 ```
 
-### 4 — Validate alignment
+### 5 — Validate alignment
 
 ```bash
 python "Debug Scripts/check_artifacts.py" \
@@ -247,7 +275,7 @@ Two logs are written:
 
 ### Real-time IPS — Hailo NPU
 
-Requires Hailo HEF model and HailoRT Python bindings.
+Requires the Hailo HEF model and HailoRT Python bindings.
 
 ```bash
 # Safe test
@@ -272,8 +300,6 @@ python ids_test/ips_hailo.py \
 
 The HEF model outputs raw logits; `ips_hailo.py` applies sigmoid internally. The feature file is auto-discovered in the input CSV's directory if `--features` is omitted (searches for `.txt`, `.json`, `.csv`, `.npy`).
 
-**Note:** A lower threshold (e.g. `--threshold 0.005`) was used during initial Hailo testing to account for quantization effects. Tune this against a known-good traffic sample.
-
 ---
 
 ### Simulating a live stream (testing)
@@ -290,55 +316,17 @@ Appends 50 rows from `sample.csv` every 2 seconds, mimicking a live flow export.
 
 ---
 
-## Feature mapping pipeline (Phase F)
+## PCAP processing — primary flow extraction path
 
-Real-world CICFlowMeter output does not match the CICIDS2017 column names that the scaler expects. Two converters are provided depending on which CICFlowMeter variant was used.
-
-### CICFlowMeter Java v4 → CICIDS2017
-
-`cicflow_to_cicids_v2.py` applies 14 pre-verified renames (column order, singular/plural differences, CWR→CWE flag typo, etc.) to produce a CSV accepted directly by `ips_hailo.py` or `ips_realtime_v2.py`.
-
-```bash
-python ids_test/cicflow_to_cicids_v2.py \
-    capture_Flow.csv \
-    capture_converted.csv \
-    --features ids_test/feature_names.npy
-```
-
-The script prints a final check — `0 features missing` means the output is fully compatible with the model.
-
-### CICFlowMeter Python fork (hieulw v0.4.x) → CICIDS2017
-
-`cicfm_to_cicids.py` additionally converts all time-based features from seconds to microseconds to match the CICIDS2017 training data.
-
-```bash
-python ids_test/cicfm_to_cicids.py capture_Flow.csv capture_converted.csv
-```
-
-### Phase F.1 demo — IPS reaction to a controlled attack
-
-`demo_phase_F1.sh` backs up iptables, starts `ips_hailo.py` in live mode, injects a single DDoS flow from a chosen IP, and verifies the DROP rule was added.
-
-```bash
-# Default test IP: 10.99.99.42 (must be outside your LAN subnet)
-bash ids_test/demo_phase_F1.sh 10.99.99.42
-```
-
-The script refuses to run if the target IP is inside your local network.
-Screenshots and logs are saved to `~/thesis_screenshots/phase_F/`.
-
----
-
-## PCAP processing (Phase G)
-
-`pcap_to_cicids.py` reads a raw PCAP file (captured with `tcpdump` or Wireshark) and computes all 80 CICIDS2017 features per flow — no CICFlowMeter installation needed.
+`pcap_to_cicids.py` reads a raw PCAP file (captured with `tcpdump` or Wireshark) and computes all 80 CICIDS2017 features per flow — no external flow meter installation needed. This is the recommended path for live-traffic testing and is the one used in the end-to-end attack experiments.
 
 ```
 Implementation details:
-  - Uses scapy (pure Python) to parse packets
+  - Uses scapy (pure Python) to parse packets — fully portable on ARM
   - Groups packets into bidirectional flows by 5-tuple
   - Closes flows on FIN/RST or 120 s inactivity
   - Output CSV is directly compatible with ips_hailo.py and ips_realtime_v2.py
+  - Produces column names matching CICIDS2017 directly (no rename/mapping step)
 ```
 
 ```bash
@@ -357,7 +345,82 @@ python ids_test/ips_hailo.py \
     --dry-run
 ```
 
-Requires `scapy` (`pip install scapy`). This is the recommended path for live-traffic testing without a CICFlowMeter instance.
+Requires `scapy` (`pip install scapy`).
+
+> **Attack-traffic tip:** when generating a SYN flood for testing with `hping3`, fix the source port (`-s <port> --keep`). Without a fixed source port, each packet is assigned its own ephemeral port and the capture explodes into thousands of one-packet flows whose statistical signature does not match the trained DDoS pattern, leading to non-detection. A fixed source port consolidates the packets into a few coherent flows that the model recognizes correctly.
+
+---
+
+## Feature mapping pipeline (legacy — CICFlowMeter)
+
+> **Deprecated in favor of `pcap_to_cicids.py`.** These converters are retained for reference and for users who already have CICFlowMeter output. CICFlowMeter (Java) has native dependencies that are awkward on the Pi's ARM architecture, which is the reason the pure-Python `pcap_to_cicids.py` extractor was developed.
+
+Real-world CICFlowMeter output does not match the CICIDS2017 column names that the scaler expects. Two converters are provided depending on which CICFlowMeter variant was used.
+
+### CICFlowMeter Java v4 → CICIDS2017
+
+`cicflow_to_cicids_v2.py` applies pre-verified renames (column order, singular/plural differences, CWR→CWE flag typo, etc.) to produce a CSV accepted directly by `ips_hailo.py` or `ips_realtime_v2.py`.
+
+```bash
+python ids_test/cicflow_to_cicids_v2.py \
+    capture_Flow.csv \
+    capture_converted.csv \
+    --features ids_test/feature_names.npy
+```
+
+The script prints a final check — `0 features missing` means the output is fully compatible with the model.
+
+### CICFlowMeter Python fork → CICIDS2017
+
+`cicfm_to_cicids.py` additionally converts all time-based features from seconds to microseconds to match the CICIDS2017 training data.
+
+```bash
+python ids_test/cicfm_to_cicids.py capture_Flow.csv capture_converted.csv
+```
+
+---
+
+## Blocking demo and end-to-end attack test
+
+### Phase F.1 demo — IPS reaction to a controlled attack
+
+`demo_phase_F1.sh` backs up iptables, starts `ips_hailo.py` in live mode, injects a single DDoS flow from a chosen IP, and verifies the DROP rule was added.
+
+```bash
+# Default test IP: 10.99.99.42 (must be outside your LAN subnet)
+bash ids_test/demo_phase_F1.sh 10.99.99.42
+```
+
+The script refuses to run if the target IP is inside your local network. Logs are saved to `~/thesis_screenshots/phase_F/`.
+
+### End-to-end attack (capture → detect → block)
+
+The full prevention loop, exercised with a real SYN flood:
+
+```bash
+# 1. On the Pi: start a listener and packet capture
+nc -l -p 9999 > /dev/null &
+sudo tcpdump -i eth0 -w attack.pcap "host <ATTACKER_IP> and host <PI_IP>" &
+
+# 2. From the attack machine: SYN flood with a FIXED source port
+sudo hping3 -i u100 -c 5000 -s 31337 --keep -S -p 9999 <PI_IP>
+
+# 3. On the Pi: extract flows and run the IPS for real
+python3 ids_test/pcap_to_cicids.py attack.pcap attack_flows.csv
+cp attack_flows.csv live_sample.csv
+python3 -u ids_test/ips_hailo.py \
+    --input live_sample.csv \
+    --hef ids_test/ids_mlp_binary_logits.hef \
+    --scaler ids_test/scaler_params.npz \
+    --features ids_test/feature_names.npy \
+    --whitelist ids_test/whitelist.txt \
+    --batch 100 --poll 1 --debug
+
+# 4. Verify the kernel is dropping the attacker's packets
+sudo iptables -L INPUT -v -n --line-numbers
+```
+
+In the reference run, 14,862 captured packets were consolidated into 2 flows, both classified as attack at probability 1.000; the attacker IP was blocked and the DROP rule rejected 250 packets / 30,105 bytes during the IPS window.
 
 ---
 
@@ -412,12 +475,12 @@ python ids_test/validate_hailo.py \
 | `--batch` | `512` | Hailo inference batch size |
 | `--out` | _(none)_ | Save results as JSON |
 
-### Recompile HEF (Dell)
+### Recompile HEF (development machine)
 
-If Hailo inference gives wrong results (all logits near −35), the HEF was quantized with mismatched calibration data. `recompile_hailo.py` regenerates it using StandardScaler-normalized float32 inputs that exactly match runtime.
+If Hailo inference gives wrong results (e.g. all logits collapsed to a near-constant value), the HEF was quantized with mismatched calibration data. `recompile_hailo.py` regenerates it using StandardScaler-normalized float32 inputs that exactly match runtime, with `opt_level=2` (bias correction + adaround).
 
 ```bash
-# Run on Dell inside hailo_env
+# Run on the development machine inside the Hailo environment
 source hailo_env/bin/activate
 cd ids_test
 python3 recompile_hailo.py
@@ -468,7 +531,7 @@ Same as above, with these replacements:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--hef` | `~/Desktop/.../ids_mlp_binary.hef` | Hailo HEF model path |
+| `--hef` | `~/Desktop/.../ids_mlp_binary_logits.hef` | Hailo HEF model path |
 | `--scaler` | `…/scaler_params.npz` | NPZ scaler params (no sklearn) |
 | `--features` | _(auto-discover)_ | Feature file; auto-found if omitted |
 
@@ -490,6 +553,21 @@ run_bench.sh / run_burst_bench.sh
 
 Each batch written by an IPS loop contributes one row to the timing CSV, with columns:
 `timestamp, variant, batch_idx, n_rows, t_preprocess_ms, t_inference_ms, t_postprocess_ms, t_log_ms, t_total_ms`
+
+### Headline benchmark numbers
+
+Measured on a Raspberry Pi 5 + Hailo-8, 90 s per configuration, steady state:
+
+| Backend | Batch | Throughput (rows/s) | Avg proc CPU (%) | Max temp (°C) |
+|---------|------:|--------------------:|-----------------:|--------------:|
+| CPU (ONNX)    | 32  | 1,516 | 342.4 | 67.8 |
+| Hailo-8 (HEF) | 32  | 1,414 | 96.5  | 57.3 |
+| CPU (ONNX)    | 128 | 4,416 | 210.1 | 67.2 |
+| Hailo-8 (HEF) | 128 | 3,992 | 96.2  | 57.9 |
+| CPU (ONNX)    | 512 | 8,170 | 112.4 | 61.1 |
+| Hailo-8 (HEF) | 512 | 7,110 | 90.0  | 57.9 |
+
+CPU is slightly faster in raw throughput (~7–13%), but the Hailo variant holds CPU usage to roughly one core and runs ~10 °C cooler at the smallest batch.
 
 ---
 
@@ -571,7 +649,7 @@ BATCH_SIZES="32 128 512" bash ids_test/run_burst_scaling.sh
 ```
 
 Results land in `bench_results/scaling_<ts>/batch_<N>/` or `bench_results/burst_scaling_<ts>/batch_<N>/`.
-The final `scaling_report.md` contains 8 tables (throughput, latency, p95, inference, preprocess, CPU, RAM — one column per batch size for each variant).
+The final `scaling_report.md` contains the per-batch tables (throughput, latency, p95, inference, preprocess, CPU, RAM — one column per batch size for each variant).
 
 `run_scaling_v2.sh` is an improved version of `run_scaling.sh` with absolute artifact paths and a health check 5 s after process start — it aborts cleanly and tails `ips.log` if a variant fails to start.
 
@@ -655,9 +733,9 @@ python ids_test/gen_scaling_report.py \
 
 `gen_report.py` produces four tables: per-stage latency (ms/batch), end-to-end throughput (rows/s, p50/p95/p99), system resource utilization, and per-core CPU distribution.
 
-`gen_report_v2.py` generates the same 8 tables plus 6 PNG figures suitable for thesis inclusion (throughput, latency CDF, per-stage breakdown, CPU/RAM over time, per-core distribution, Hailo vs CPU comparison).
+`gen_report_v2.py` generates the same tables plus PNG figures suitable for thesis inclusion (throughput, latency distribution, per-stage breakdown, CPU over time, temperature over time, efficiency scatter).
 
-`gen_scaling_report.py` produces eight tables (S1–S8) covering throughput, batch latency, per-inference latency, inference-only time, preprocess time, p95 latency, CPU%, and RAM, with the winner bolded per row.
+`gen_scaling_report.py` produces tables covering throughput, batch latency, per-inference latency, inference-only time, preprocess time, p95 latency, CPU%, and RAM, with the winner bolded per row.
 
 ---
 
@@ -688,22 +766,9 @@ Non-numeric columns and extra numeric columns are ignored. Missing required colu
 
 ## Hailo model conversion (reference)
 
-The HEF files already in the repository were produced from `ids_mlp_binary_logits.onnx` using the Hailo Model Zoo toolchain. Key steps:
+The HEF in the repository was produced from the logits ONNX model using the Hailo Dataflow Compiler. The recommended path is `recompile_hailo.py` (see [Hailo utilities](#hailo-utilities)), which uses runtime-matched calibration data and `opt_level=2` (bias correction + adaround) rather than a random calibration set — calibration quality has a direct, measurable effect on quantization accuracy.
 
-```bash
-# 1. Parse ONNX → HAR
-hailo parse onnx ids_mlp_binary_logits.onnx --net-name ids_mlp_binary_logits
-
-# 2. Optimize / quantize
-hailo optimize ids_mlp_binary_logits.har --use-random-calib-set --output ids_mlp_binary_logits_quant.har
-
-# 3. Compile → HEF
-hailo compile ids_mlp_binary_logits_quant.har --output ids_mlp_binary_logits.hef
-```
-
-The logits variant is used because Hailo quantization degrades sigmoid output; applying sigmoid post-inference in Python on the raw logits gives better results.
-
-Use `recompile_hailo.py` (see [Hailo utilities](#hailo-utilities)) instead of the manual steps above when quantization quality matters — it uses runtime-matched calibration data.
+The logits variant is used because quantizing through the final sigmoid degrades output quality; applying sigmoid post-inference in Python on the raw logits gives better results. The model loads as `HAILO8`, single context, input `1×1×80` UINT8, output `NC(1)`.
 
 ---
 
@@ -715,14 +780,16 @@ Use `recompile_hailo.py` (see [Hailo utilities](#hailo-utilities)) instead of th
 | 14.10.2025 | Offline inference working on Raspberry Pi; `ids_realtime.py` initial version |
 | 02.04.2026 | IDS and IPS working on CPU/ONNX without Hailo |
 | 10.04.2026 | Hailo pipeline runs end-to-end; HEF loading, preprocessing, and batch inference confirmed; `iptables` dry-run verified |
-| 10.05.2026 | Benchmarking subsystem added: `bench_timing.py` (opt-in per-stage timer), `resource_sampler.py` (CPU/RAM/temp), `gen_report.py`, `gen_scaling_report.py`; both `ips_realtime_v2.py` and `ips_hailo.py` instrumented; four orchestration shell scripts added (`run_bench.sh`, `run_burst_bench.sh`, `run_scaling.sh`, `run_burst_scaling.sh`) for streaming, burst, and scaling benchmarks |
-| 23.05.2026 | Phase F complete — feature mapping pipeline for real CICFlowMeter output: `cicfm_to_cicids.py` (Python fork, sec→µs fix) and `cicflow_to_cicids_v2.py` (Java v4, 14 verified renames); IPS reaction demo `demo_phase_F1.sh` with real iptables blocking; Hailo utilities added: `validate_hailo.py` (F1/threshold sweep/ONNX comparison), `check_hailo_artifacts.py` (pre-flight check), `recompile_hailo.py` (calibration-matched HEF recompilation); `gen_report_v2.py` with PNG figures; `run_scaling_v2.sh` with health checks |
-| 24.05.2026 | Phase G WIP — `pcap_to_cicids.py`: direct PCAP→CICIDS2017 converter using scapy; computes all 80 features per flow, no CICFlowMeter required |
+| 10.05.2026 | Benchmarking subsystem added: `bench_timing.py` (opt-in per-stage timer), `resource_sampler.py` (CPU/RAM/temp), `gen_report.py`, `gen_scaling_report.py`; both `ips_realtime_v2.py` and `ips_hailo.py` instrumented; orchestration shell scripts added (`run_bench.sh`, `run_burst_bench.sh`, `run_scaling.sh`, `run_burst_scaling.sh`) |
+| 22.05.2026 | Phase D complete — full HEF validation on CICIDS2017 Friday DDoS (225,745 flows): Hailo INT8 F1 = 99.20%, ONNX FP32 F1 = 99.84%, quantization gap −0.64 pp, Hailo/ONNX agreement 99.2%; `validate_hailo.py`, `check_hailo_artifacts.py`, `recompile_hailo.py` (calibration-matched recompilation) |
+| 22.05.2026 | Phase E complete — streaming/scaling benchmarks on Pi 5 across batch sizes 32/128/512: Hailo cuts process CPU by up to 71.8% and max temperature by 10.5 °C vs ONNX at batch 32; raw Hailo hardware throughput measured at 56,568 inf/s; `gen_report_v2.py` with PNG figures; `run_scaling_v2.sh` with health checks |
+| 23.05.2026 | Phase F complete — IPS reaction demo `demo_phase_F1.sh` with real iptables blocking; port-level blocking granularity verified (blocked port dropped while SSH/ICMP to the same host kept working); legacy feature-mapping converters retained (`cicfm_to_cicids.py`, `cicflow_to_cicids_v2.py`) |
+| 24.05.2026 | Phase G complete — `pcap_to_cicids.py` (direct PCAP→CICIDS2017 via scapy) used in a full end-to-end attack test: real SYN flood (fixed source port) → 14,862 packets captured → 2 consolidated flows → both detected at prob 1.000 → attacker IP blocked, 250 packets / 30,105 bytes dropped by the kernel |
 
-### Next steps
+### Possible future work
 
-- Complete Phase G: test `pcap_to_cicids.py` on live captures and validate flow feature accuracy against CICFlowMeter reference output
-- Run full streaming and burst scaling benchmarks on Pi 5 with `friday_ddos.csv` to get CPU vs Hailo comparison numbers
-- Tune threshold per variant based on benchmark F1 results
-- Document actual benchmark results (throughput, latency tables) once collected
-- Consider keeping Hailo context open between batches to reduce per-batch activation overhead (~10–50 ms)
+- Move from batch processing to continuous, packet-by-packet streaming to reduce capture-to-decision latency
+- Extend the binary classifier to a multi-class model (DDoS, port scan, brute force, …) using the CICIDS2017 attack labels
+- Add an in-line bridge mode so malicious traffic is dropped before reaching the target, rather than at the destination host
+- Exploit the large Hailo headroom (56k inf/s vs ~1.4–7k used) for substantially more complex models (e.g. recurrent or transformer-based flow analysis)
+- Keep the Hailo context open between batches to trim per-batch activation overhead
