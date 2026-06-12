@@ -10,7 +10,7 @@ import pandas as pd
 import joblib
 import onnxruntime as ort
 
-# ---------- Config implicită (poți suprascrie din CLI) ----------
+# ---------- Default config (can be overridden from CLI) ----------
 DEFAULT_BASE = Path.home() / "ids"
 DEFAULT_INPUT = DEFAULT_BASE / "sample.csv"
 DEFAULT_MODEL = DEFAULT_BASE / "ids_mlp_binary.onnx"
@@ -23,7 +23,7 @@ THRESHOLD = 0.01
 BATCH_SIZE = 1024
 
 
-# ---------- Utilitare ----------
+# ---------- Utilities ----------
 def clean_numeric(df_num: pd.DataFrame) -> pd.DataFrame:
     df_num = df_num.replace([np.inf, -np.inf], np.nan)
     df_num = df_num.clip(lower=-1e12, upper=1e12)
@@ -36,7 +36,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\ufeff", "", regex=False)
+        .str.replace("﻿", "", regex=False)
         .str.strip()
         .str.lower()
     )
@@ -54,7 +54,7 @@ def build_feature_matrix(df: pd.DataFrame, scaler, feats_path: Path):
     missing = [c for c in wanted if c not in df_num.columns]
     if missing:
         raise RuntimeError(
-            "Lipsesc coloane față de setul de antrenare: " + ", ".join(missing[:20])
+            "Columns missing compared to the training set: " + ", ".join(missing[:20])
         )
 
     df_num = df_num[wanted]
@@ -87,20 +87,20 @@ def append_alerts(rows_df: pd.DataFrame, prob, pred, alert_log: Path):
     attacks = int(pred.sum())
     if attacks:
         top_prob = float(np.max(prob[pred == 1]))
-        print(f"[ALERT] {attacks} eveniment(e) ATTACK (top prob: {top_prob:.3f})")
+        print(f"[ALERT] {attacks} ATTACK event(s) (top prob: {top_prob:.3f})")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="CSV sursă (fișier unic care crește)")
-    ap.add_argument("--model", default=str(DEFAULT_MODEL), help="Model ONNX (binary)")
+    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="Source CSV (single file that grows)")
+    ap.add_argument("--model", default=str(DEFAULT_MODEL), help="ONNX model (binary)")
     ap.add_argument("--scaler", default=str(DEFAULT_SCALER), help="scaler.joblib")
     ap.add_argument("--features", default=str(DEFAULT_FEATS), help="feature_names.npy")
-    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="fișierul de log pentru alerte")
-    ap.add_argument("--poll", type=int, default=POLL_SEC, help="interval de poll (sec)")
-    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="mărimea batch-ului")
-    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="prag binary pentru ATTACK")
-    ap.add_argument("--debug", action="store_true", help="afișează mesaje de debug")
+    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="alert log file")
+    ap.add_argument("--poll", type=int, default=POLL_SEC, help="poll interval (sec)")
+    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="batch size")
+    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="binary threshold for ATTACK")
+    ap.add_argument("--debug", action="store_true", help="print debug messages")
     args = ap.parse_args()
 
     input_csv = Path(args.input)
@@ -110,11 +110,11 @@ def main():
     alert_log = Path(args.alert_log)
 
     if not model_p.exists():
-        raise FileNotFoundError(f"Modelul nu există: {model_p}")
+        raise FileNotFoundError(f"Model not found: {model_p}")
     if not scaler_p.exists():
-        raise FileNotFoundError(f"Scalerul nu există: {scaler_p}")
+        raise FileNotFoundError(f"Scaler not found: {scaler_p}")
     if not feats_p.exists():
-        raise FileNotFoundError(f"Feature list nu există: {feats_p}")
+        raise FileNotFoundError(f"Feature list not found: {feats_p}")
 
     scaler = joblib.load(scaler_p)
     sess = ort.InferenceSession(str(model_p), providers=["CPUExecutionProvider"])
@@ -122,10 +122,10 @@ def main():
 
     last_seen = 0
     print(
-        f"[INFO] Pornit. Monitorizez: {input_csv} | poll={args.poll}s | "
+        f"[INFO] Started. Monitoring: {input_csv} | poll={args.poll}s | "
         f"batch={args.batch} | threshold={args.threshold}"
     )
-    print(f"[INFO] Log alerte: {alert_log}")
+    print(f"[INFO] Alert log: {alert_log}")
 
     while True:
         if input_csv.exists():
@@ -135,22 +135,22 @@ def main():
 
                 if args.debug:
                     print(f"[DEBUG] total rows in file: {n} | last_seen: {last_seen}")
-                
+
                 if n < last_seen:
-                    print(f"[INFO] Fișier recreat sau trunchiat. Reset last_seen: {last_seen} -> 0")
+                    print(f"[INFO] File recreated or truncated. Reset last_seen: {last_seen} -> 0")
                     last_seen = 0
 
                 if n > last_seen:
                     df_new = df_all.iloc[last_seen:n]
 
                     if args.debug:
-                        print(f"[DEBUG] linii noi: {len(df_new)}")
+                        print(f"[DEBUG] new lines: {len(df_new)}")
 
                     for start in range(0, len(df_new), args.batch):
                         chunk = df_new.iloc[start:start + args.batch]
 
                         if args.debug:
-                            print(f"[DEBUG] procesez chunk {start}:{start + len(chunk)}")
+                            print(f"[DEBUG] processing chunk {start}:{start + len(chunk)}")
 
                         Xs = build_feature_matrix(chunk, scaler, feats_p)
                         prob, pred = run_batch(sess, input_name, Xs, args.threshold)
@@ -165,11 +165,11 @@ def main():
 
                     last_seen = n
                 else:
-                    print("[DEBUG] Nicio linie noua de procesat.")
+                    print("[DEBUG] No new lines to process.")
             except Exception as e:
-                print(f"[WARN] Eroare la procesare: {e}")
+                print(f"[WARN] Processing error: {e}")
         else:
-            print(f"[INFO] Aștept fișierul de intrare: {input_csv}")
+            print(f"[INFO] Waiting for input file: {input_csv}")
 
         time.sleep(args.poll)
 

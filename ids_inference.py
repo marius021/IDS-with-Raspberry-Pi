@@ -16,7 +16,7 @@ def read_csv_robust(path: Path) -> pd.DataFrame:
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\ufeff", "", regex=False)
+        .str.replace("﻿", "", regex=False)
         .str.strip()
         .str.lower()
     )
@@ -25,39 +25,39 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 def clean_numeric(df_num: pd.DataFrame) -> pd.DataFrame:
     # 1) Inf/-Inf -> NaN
     df_num = df_num.replace([np.inf, -np.inf], np.nan)
-    # 2) Opțional: limitează outlierii aberați (protecție)
+    # 2) Optional: clip extreme outliers (protection)
     df_num = df_num.clip(lower=-1e12, upper=1e12)
-    # 3) Completează NaN cu medianele coloanelor (fallback -> 0)
+    # 3) Fill NaN with column medians (fallback -> 0)
     med = df_num.median(numeric_only=True)
     df_num = df_num.fillna(med).fillna(0)
     return df_num
 
 def build_feature_matrix(df: pd.DataFrame, scaler, feature_names_path: Path | None):
     """
-    Returnează (X_scaled, used_feature_names).
-    - Dacă există feature_names.npy, folosește FIX acea ordine de coloane.
-    - Curăță numericii (inf/-inf/NaN/outlieri) exact ca în training.
+    Returns (X_scaled, used_feature_names).
+    - If feature_names.npy exists, uses THAT fixed column order.
+    - Cleans numerics (inf/-inf/NaN/outliers) exactly as in training.
     """
     df_num = df.select_dtypes(include=[np.number]).copy()
     df_num = clean_numeric(df_num)
 
     if feature_names_path and feature_names_path.exists():
         wanted = np.load(feature_names_path, allow_pickle=True).tolist()
-        # asigură-te că toate coloanele există; dacă lipsesc, aruncă eroare clară
+        # ensure all columns exist; raise a clear error if any are missing
         missing = [c for c in wanted if c not in df_num.columns]
         if missing:
-            raise RuntimeError("Lipsesc coloane față de setul de antrenare: " + ", ".join(missing[:20]))
+            raise RuntimeError("Columns missing compared to the training set: " + ", ".join(missing[:20]))
         df_num = df_num[wanted]
         used = wanted
     else:
         used = df_num.columns.tolist()
         if getattr(scaler, "n_features_in_", None) and len(used) != scaler.n_features_in_:
             raise RuntimeError(
-                f"Numărul de coloane numerice ({len(used)}) nu corespunde cu scaler.n_features_in_ "
-                f"({scaler.n_features_in_}). Folosește --features feature_names.npy."
+                f"Number of numeric columns ({len(used)}) does not match scaler.n_features_in_ "
+                f"({scaler.n_features_in_}). Use --features feature_names.npy."
             )
 
-    # acum toate valorile sunt finite și rezonabile
+    # all values are now finite and reasonable
     X = df_num.values.astype(np.float32)
     X_scaled = scaler.transform(X)
     return X_scaled, used
@@ -91,18 +91,18 @@ def run_inference(input_csv, model_path, scaler_path, out_csv, mode, feature_nam
         df["pred_class"] = pred_names
 
     df.to_csv(out_csv, index=False, encoding="utf-8")
-    print(f"[OK] Predicțiile au fost scrise în: {out_csv}")
+    print(f"[OK] Predictions written to: {out_csv}")
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="CSV de intrare pentru inferență")
-    ap.add_argument("--model", required=True, help="Model ONNX (ids_mlp_binary.onnx sau ids_mlp_multiclass.onnx)")
-    ap.add_argument("--scaler", default="scaler.joblib", help="Scaler joblib salvat la training")
-    ap.add_argument("--mode", choices=["binary", "multi"], required=True, help="Tipul modelului")
-    ap.add_argument("--out", default="predictions.csv", help="CSV de ieșire cu predicții")
-    ap.add_argument("--features", default="feature_names.npy", help="Lista de coloane din training")
-    ap.add_argument("--classes", default="classes.npy", help="(doar multi) fișier cu numele claselor")
-    ap.add_argument("--threshold", type=float, default=0.5, help="(binary) pragul ATTACK")
+    ap.add_argument("--input", required=True, help="Input CSV for inference")
+    ap.add_argument("--model", required=True, help="ONNX model (ids_mlp_binary.onnx or ids_mlp_multiclass.onnx)")
+    ap.add_argument("--scaler", default="scaler.joblib", help="Scaler joblib saved during training")
+    ap.add_argument("--mode", choices=["binary", "multi"], required=True, help="Model type")
+    ap.add_argument("--out", default="predictions.csv", help="Output CSV with predictions")
+    ap.add_argument("--features", default="feature_names.npy", help="List of columns from training")
+    ap.add_argument("--classes", default="classes.npy", help="(multi only) file with class names")
+    ap.add_argument("--threshold", type=float, default=0.5, help="(binary) ATTACK threshold")
     args = ap.parse_args()
 
     run_inference(

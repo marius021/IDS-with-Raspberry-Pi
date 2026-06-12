@@ -48,7 +48,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\ufeff", "", regex=False)
+        .str.replace("﻿", "", regex=False)
         .str.strip()
         .str.lower()
     )
@@ -74,7 +74,7 @@ def build_feature_matrix(df: pd.DataFrame, scaler, feats_path: Path):
     missing = [c for c in wanted if c not in df_num.columns]
     if missing:
         raise RuntimeError(
-            "Lipsesc coloane față de setul de antrenare: " + ", ".join(missing[:20])
+            "Columns missing compared to the training set: " + ", ".join(missing[:20])
         )
 
     df_num = df_num[wanted]
@@ -146,7 +146,7 @@ def append_alerts(rows_df: pd.DataFrame, prob, pred, alert_log: Path):
     attacks = int(pred.sum())
     if attacks:
         top_prob = float(np.max(prob[pred == 1]))
-        print(f"[ALERT] {attacks} eveniment(e) ATTACK (top prob: {top_prob:.3f})")
+        print(f"[ALERT] {attacks} ATTACK event(s) (top prob: {top_prob:.3f})")
 
 
 def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
@@ -156,7 +156,7 @@ def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
 
     if src_ip_col is None:
         if int(pred.sum()) > 0:
-            print("[WARN] Atac detectat, dar nu există coloană src ip. Nu se poate aplica blocarea.")
+            print("[WARN] Attack detected, but no src ip column found. Cannot apply blocking.")
         return
 
     with open(action_log, "a", encoding="utf-8") as f:
@@ -191,7 +191,7 @@ def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
                 rec["reason"] = "already_seen_this_run"
                 f.write(json.dumps(rec) + "\n")
                 if debug:
-                    print(f"[DEBUG] SKIP deja văzut în sesiunea curentă: {raw_ip}")
+                    print(f"[DEBUG] SKIP already seen in current session: {raw_ip}")
                 continue
 
             if is_ip_blocked(raw_ip):
@@ -200,7 +200,7 @@ def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
                 f.write(json.dumps(rec) + "\n")
                 seen_cache.add(raw_ip)
                 if debug:
-                    print(f"[DEBUG] SKIP deja blocat: {raw_ip}")
+                    print(f"[DEBUG] SKIP already blocked: {raw_ip}")
                 continue
 
             result = block_ip(raw_ip, dry_run=dry_run)
@@ -226,18 +226,18 @@ def append_actions(rows_df, prob, pred, src_ip_col, action_log: Path,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="CSV sursă (fișier unic care crește)")
-    ap.add_argument("--model", default=str(DEFAULT_MODEL), help="Model ONNX (binary)")
+    ap.add_argument("--input", default=str(DEFAULT_INPUT), help="Source CSV (single file that grows)")
+    ap.add_argument("--model", default=str(DEFAULT_MODEL), help="ONNX model (binary)")
     ap.add_argument("--scaler", default=str(DEFAULT_SCALER), help="scaler.joblib")
     ap.add_argument("--features", default=str(DEFAULT_FEATS), help="feature_names.npy")
-    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="fișierul de log pentru alerte")
-    ap.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG), help="fișierul de log pentru acțiuni IPS")
-    ap.add_argument("--whitelist", default="", help="fișier text cu IP-uri whitelisted, câte unul pe linie")
-    ap.add_argument("--poll", type=int, default=POLL_SEC, help="interval de poll (sec)")
-    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="mărimea batch-ului")
-    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="prag binary pentru ATTACK")
-    ap.add_argument("--dry-run", action="store_true", help="nu aplică iptables, doar loghează ce ar fi blocat")
-    ap.add_argument("--debug", action="store_true", help="afișează mesaje de debug")
+    ap.add_argument("--alert-log", default=str(DEFAULT_ALERT_LOG), help="alert log file")
+    ap.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG), help="IPS action log file")
+    ap.add_argument("--whitelist", default="", help="text file with whitelisted IPs, one per line")
+    ap.add_argument("--poll", type=int, default=POLL_SEC, help="poll interval (sec)")
+    ap.add_argument("--batch", type=int, default=BATCH_SIZE, help="batch size")
+    ap.add_argument("--threshold", type=float, default=THRESHOLD, help="binary threshold for ATTACK")
+    ap.add_argument("--dry-run", action="store_true", help="do not apply iptables, only log what would be blocked")
+    ap.add_argument("--debug", action="store_true", help="show debug messages")
     args = ap.parse_args()
 
     input_csv = Path(args.input)
@@ -249,11 +249,11 @@ def main():
     whitelist_path = Path(args.whitelist) if args.whitelist else None
 
     if not model_p.exists():
-        raise FileNotFoundError(f"Modelul nu există: {model_p}")
+        raise FileNotFoundError(f"Model does not exist: {model_p}")
     if not scaler_p.exists():
-        raise FileNotFoundError(f"Scalerul nu există: {scaler_p}")
+        raise FileNotFoundError(f"Scaler does not exist: {scaler_p}")
     if not feats_p.exists():
-        raise FileNotFoundError(f"Feature list nu există: {feats_p}")
+        raise FileNotFoundError(f"Feature list does not exist: {feats_p}")
 
     whitelist = load_whitelist(whitelist_path)
     scaler = joblib.load(scaler_p)
@@ -264,11 +264,11 @@ def main():
     seen_cache = set()
 
     print(
-        f"[INFO] Pornit. Monitorizez: {input_csv} | poll={args.poll}s | "
+        f"[INFO] Started. Monitoring: {input_csv} | poll={args.poll}s | "
         f"batch={args.batch} | threshold={args.threshold} | dry_run={args.dry_run}"
     )
-    print(f"[INFO] Log alerte: {alert_log}")
-    print(f"[INFO] Log acțiuni: {action_log}")
+    print(f"[INFO] Alert log: {alert_log}")
+    print(f"[INFO] Action log: {action_log}")
     print(f"[INFO] Whitelist size: {len(whitelist)}")
 
     bench = maybe_writer(default_path="timing_cpu.csv", default_variant="cpu")
@@ -286,7 +286,7 @@ def main():
                     print(f"[DEBUG] total rows in file: {n} | last_seen: {last_seen}")
 
                 if n < last_seen:
-                    print(f"[INFO] Fișier recreat sau trunchiat. Reset last_seen: {last_seen} -> 0")
+                    print(f"[INFO] File recreated or truncated. Resetting last_seen: {last_seen} -> 0")
                     last_seen = 0
                     seen_cache.clear()
 
@@ -294,7 +294,7 @@ def main():
                     df_new = df_all.iloc[last_seen:n].copy()
 
                     if args.debug:
-                        print(f"[DEBUG] linii noi: {len(df_new)}")
+                        print(f"[DEBUG] new rows: {len(df_new)}")
 
                     src_ip_col = detect_src_ip_column(df_new)
                     if args.debug:
@@ -304,7 +304,7 @@ def main():
                         chunk = df_new.iloc[start:start + args.batch].copy()
 
                         if args.debug:
-                            print(f"[DEBUG] procesez chunk {start}:{start + len(chunk)}")
+                            print(f"[DEBUG] processing chunk {start}:{start + len(chunk)}")
 
                         timer.reset()
 
@@ -317,7 +317,7 @@ def main():
                         timer.stop("inference")
 
                         timer.start("postprocess")
-                        # sigmoid + threshold sunt deja în run_batch; aici doar marcăm
+                        # sigmoid + threshold are already in run_batch; just marking here
                         n_attacks = int(pred.sum())
                         timer.stop("postprocess")
 
@@ -339,11 +339,11 @@ def main():
 
                     last_seen = n
                 else:
-                    print("[DEBUG] Nicio linie noua de procesat.")
+                    print("[DEBUG] No new rows to process.")
             except Exception as e:
-                print(f"[WARN] Eroare la procesare: {e}")
+                print(f"[WARN] Error during processing: {e}")
         else:
-            print(f"[INFO] Aștept fișierul de intrare: {input_csv}")
+            print(f"[INFO] Waiting for input file: {input_csv}")
 
         time.sleep(args.poll)
 

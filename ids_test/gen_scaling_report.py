@@ -3,13 +3,13 @@
 """
 gen_scaling_report.py
 
-Citește un director cu sub-directoare batch_X (X = 32, 128, 256, ...) și
-generează un tabel de scaling care arată:
-  - throughput, latență per batch, latență per rând
-  - utilizare CPU și RAM
-pentru fiecare BATCH × variant (cpu / hailo).
+Reads a directory with batch_X subdirectories (X = 32, 128, 256, ...) and
+generates a scaling table showing:
+  - throughput, latency per batch, latency per row
+  - CPU and RAM utilization
+for each BATCH × variant (cpu / hailo).
 
-Folosire:
+Usage:
   python3 gen_scaling_report.py \\
       --scaling-dir bench_results/scaling_20260509_xxxx \\
       --out scaling_report.md
@@ -31,7 +31,7 @@ def fmt(x, prec=2, dash="—"):
 
 
 def stats_for_dir(batch_dir: Path):
-    """Calculează statisticile pentru un director batch_X."""
+    """Calculate statistics for a batch_X directory."""
     out = {"cpu": {}, "hailo": {}}
 
     for variant in ("cpu", "hailo"):
@@ -70,7 +70,7 @@ def stats_for_dir(batch_dir: Path):
 
 
 def make_scaling_table(rows_data, metric_key, label, prec=1, lower_better=False):
-    """Construiește un tabel pivot batch × (cpu, hailo) cu o singură metrică."""
+    """Build a pivot table batch × (cpu, hailo) with a single metric."""
     lines = [f"### {label}", ""]
     header = "| Batch size |" + "".join(f" CPU | Hailo |" for _ in [1])
     sep = "|---|" + "---:|---:|"
@@ -81,7 +81,7 @@ def make_scaling_table(rows_data, metric_key, label, prec=1, lower_better=False)
         cpu_v = stats["cpu"].get(metric_key)
         h_v = stats["hailo"].get(metric_key)
 
-        # Marcheaza castigatorul
+        # Mark the winner
         cpu_str = fmt(cpu_v, prec)
         h_str = fmt(h_v, prec)
 
@@ -104,15 +104,15 @@ def make_scaling_table(rows_data, metric_key, label, prec=1, lower_better=False)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scaling-dir", required=True, help="Director cu batch_X subdirs")
+    ap.add_argument("--scaling-dir", required=True, help="Directory with batch_X subdirs")
     ap.add_argument("--out", default="scaling_report.md")
     args = ap.parse_args()
 
     base = Path(args.scaling_dir)
     if not base.exists():
-        raise SystemExit(f"Directorul nu exista: {base}")
+        raise SystemExit(f"Directory does not exist: {base}")
 
-    # Gaseste subdirectoarele batch_X
+    # Find batch_X subdirectories
     batch_dirs = {}
     for d in sorted(base.iterdir()):
         if not d.is_dir():
@@ -122,11 +122,11 @@ def main():
             batch_dirs[int(m.group(1))] = d
 
     if not batch_dirs:
-        raise SystemExit(f"Niciun batch_X in {base}")
+        raise SystemExit(f"No batch_X directories found in {base}")
 
-    print(f"[SCALE] Gasit {len(batch_dirs)} batch sizes: {sorted(batch_dirs.keys())}")
+    print(f"[SCALE] Found {len(batch_dirs)} batch sizes: {sorted(batch_dirs.keys())}")
 
-    # Calculeaza statistici pentru fiecare
+    # Calculate statistics for each
     rows_data = {}
     for batch_size, batch_dir in batch_dirs.items():
         rows_data[batch_size] = stats_for_dir(batch_dir)
@@ -134,75 +134,75 @@ def main():
               f"cpu_batches={rows_data[batch_size]['cpu'].get('n_batches', 0)}, "
               f"hailo_batches={rows_data[batch_size]['hailo'].get('n_batches', 0)}")
 
-    # Construieste raportul
+    # Build the report
     parts = [
         f"# Scaling Benchmark: CPU vs Hailo",
         f"",
-        f"Director: `{base}`",
+        f"Directory: `{base}`",
         f"",
         f"Hardware: Raspberry Pi 5 + Hailo-8 (26 TOPs, M.2 PCIe)",
         f"",
-        f"Batch sizes testate: {', '.join(str(b) for b in sorted(rows_data.keys()))}",
+        f"Batch sizes tested: {', '.join(str(b) for b in sorted(rows_data.keys()))}",
         f"",
-        f"**Bold** = câștigătorul la metrica respectivă.",
+        f"**Bold** = winner for the respective metric.",
         f"",
         f"---",
         f"",
         make_scaling_table(rows_data, "rows_per_s",
-                           "Tabel S1 — Throughput (rows/sec, mai mult = mai bine)", prec=1),
+                           "Table S1 — Throughput (rows/sec, higher is better)", prec=1),
         make_scaling_table(rows_data, "batch_avg_ms",
-                           "Tabel S2 — Latență medie per batch (ms, mai puțin = mai bine)",
+                           "Table S2 — Average latency per batch (ms, lower is better)",
                            prec=2, lower_better=True),
         make_scaling_table(rows_data, "lat_per_inf_ms",
-                           "Tabel S3 — Latență per inferență (ms/rând, mai puțin = mai bine)",
+                           "Table S3 — Latency per inference (ms/row, lower is better)",
                            prec=4, lower_better=True),
         make_scaling_table(rows_data, "inf_avg_ms",
-                           "Tabel S4 — Timp inferență pură per batch (ms, fără preprocess/log)",
+                           "Table S4 — Pure inference time per batch (ms, without preprocess/log)",
                            prec=3, lower_better=True),
         make_scaling_table(rows_data, "preprocess_avg_ms",
-                           "Tabel S5 — Preprocess per batch (ms — domină total!)",
+                           "Table S5 — Preprocess per batch (ms — dominates total!)",
                            prec=3, lower_better=True),
         make_scaling_table(rows_data, "batch_p95_ms",
-                           "Tabel S6 — Latență p95 per batch (ms, predictibilitate)",
+                           "Table S6 — p95 latency per batch (ms, predictability)",
                            prec=2, lower_better=True),
         make_scaling_table(rows_data, "cpu_proc_avg",
-                           "Tabel S7 — CPU mediu (%, mai puțin = mai bine)",
+                           "Table S7 — Average CPU (%, lower is better)",
                            prec=1, lower_better=True),
         make_scaling_table(rows_data, "rss_mb",
-                           "Tabel S8 — RAM (MB, mai puțin = mai bine)",
+                           "Table S8 — RAM (MB, lower is better)",
                            prec=1, lower_better=True),
         f"---",
         f"",
-        f"## Cum se citesc tabelele",
+        f"## How to read the tables",
         f"",
-        f"- **Throughput (S1)**: numărul de rânduri / secundă procesate end-to-end. ",
-        f"  Include preprocesare + inferență + log. ",
-        f"  Pentru un IPS, reprezintă debitul maxim de flow-uri pe care îl poate susține.",
-        f"- **Latență per batch (S2)**: cât durează un batch de la `pd.read_csv` slice ",
-        f"  până la log scris. Include overhead-ul Hailo (~3 ms / batch context activate).",
-        f"- **Inferență pură (S4)**: doar timpul pentru `runner.infer()` sau `sess.run()`. ",
-        f"  La batch mare, costul fix Hailo se amortizează — vezi cum coloana CPU se ",
-        f"  apropie sau e depășită de Hailo.",
-        f"- **Preprocess (S5)**: pandas + scaler. **Bottleneck-ul** la batch mic. ",
-        f"  Indiferent ce backend ML folosești, asta domină timpul total.",
-        f"- **p95 (S6)**: 95% din batch-uri se termină sub această valoare. ",
-        f"  Important pentru SLA: arată coada distribuției, nu doar media.",
-        f"- **CPU & RAM (S7-S8)**: utilizarea procesului. ",
-        f"  La Hailo, CPU-ul e mai puțin folosit pentru că calculul migrează pe NPU.",
+        f"- **Throughput (S1)**: number of rows / second processed end-to-end. ",
+        f"  Includes preprocessing + inference + log. ",
+        f"  For an IPS, represents the maximum flow throughput it can sustain.",
+        f"- **Latency per batch (S2)**: how long a batch takes from `pd.read_csv` slice ",
+        f"  to log written. Includes Hailo overhead (~3 ms / batch context activate).",
+        f"- **Pure inference (S4)**: only the time for `runner.infer()` or `sess.run()`. ",
+        f"  At large batch sizes, the fixed Hailo cost amortizes — see how the CPU column ",
+        f"  approaches or is overtaken by Hailo.",
+        f"- **Preprocess (S5)**: pandas + scaler. **Bottleneck** at small batch sizes. ",
+        f"  Regardless of the ML backend used, this dominates the total time.",
+        f"- **p95 (S6)**: 95% of batches finish below this value. ",
+        f"  Important for SLA: shows the tail of the distribution, not just the average.",
+        f"- **CPU & RAM (S7-S8)**: process utilization. ",
+        f"  With Hailo, CPU usage is lower because computation migrates to the NPU.",
         f"",
-        f"## Concluzie scaling",
+        f"## Scaling conclusion",
         f"",
-        f"Pentru un MLP binary de dimensiune mică, **Hailo nu câștigă la throughput** ",
-        f"decât eventual la batch-uri mari. Câștigul real e la **utilizare resurse** ",
-        f"(CPU, RAM) și **predictibilitate** (p95/p99 mai mici). Pentru un sistem IPS ",
-        f"unde ML e una din mai multe componente (captură, parsare flow, decizie, ",
-        f"actuator iptables), valoarea Hailo este eliberarea CPU-ului pentru restul ",
-        f"pipeline-ului, nu accelerarea ML-ului în sine.",
+        f"For a small binary MLP, **Hailo does not win on throughput** ",
+        f"except possibly at large batch sizes. The real gain is in **resource utilization** ",
+        f"(CPU, RAM) and **predictability** (lower p95/p99). For an IPS system ",
+        f"where ML is one of several components (capture, flow parsing, decision, ",
+        f"iptables actuator), the value of Hailo is freeing up the CPU for the rest of the ",
+        f"pipeline, not accelerating the ML itself.",
     ]
 
     out_path = Path(args.out)
     out_path.write_text("\n".join(parts), encoding="utf-8")
-    print(f"[DONE] Raport: {out_path}")
+    print(f"[DONE] Report: {out_path}")
     print()
     print("\n".join(parts))
 

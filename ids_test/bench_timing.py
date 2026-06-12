@@ -3,14 +3,14 @@
 """
 bench_timing.py
 
-Modul mic de instrumentare pentru pipeline-ul IPS.
-Activat doar dacă variabila de mediu BENCH=1 sau BENCH_OUT este setată.
+Small instrumentation module for the IPS pipeline.
+Activated only if the environment variable BENCH=1 or BENCH_OUT is set.
 
-Folosire minim invazivă (vezi instructions_apply.md):
+Minimal-invasive usage (see instructions_apply.md):
 
     from bench_timing import StageTimer, BenchWriter, maybe_writer
 
-    bench = maybe_writer()      # None dacă nu rulează în mod benchmark
+    bench = maybe_writer()      # None if not running in benchmark mode
     timer = StageTimer()
     batch_idx = 0
 
@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 
 
 class StageTimer:
-    """Acumulează timpii per stadiu pentru un singur batch."""
+    """Accumulates times per stage for a single batch."""
 
     def __init__(self):
         self._starts: Dict[str, float] = {}
@@ -45,9 +45,9 @@ class StageTimer:
 
     def stop(self, stage: str):
         if stage not in self._starts:
-            raise RuntimeError(f"start('{stage}') nu a fost apelat înainte de stop()")
+            raise RuntimeError(f"start('{stage}') was not called before stop()")
         elapsed_ms = (time.perf_counter() - self._starts[stage]) * 1000.0
-        # Acumulează dacă același stage e cronometrat de mai multe ori per batch
+        # Accumulate if the same stage is timed more than once per batch
         self.times[stage] = self.times.get(stage, 0.0) + elapsed_ms
 
     def reset(self):
@@ -59,7 +59,7 @@ class StageTimer:
 
 
 class BenchWriter:
-    """CSV writer pentru timing per batch. O linie = un batch."""
+    """CSV writer for per-batch timing. One line = one batch."""
 
     DEFAULT_STAGES = ["read", "preprocess", "inference", "postprocess", "log"]
 
@@ -103,17 +103,17 @@ class BenchWriter:
 def maybe_writer(default_path: str = "timing.csv",
                  default_variant: str = "unknown") -> Optional[BenchWriter]:
     """
-    Întoarce un BenchWriter dacă BENCH=1 sau BENCH_OUT este setat.
-    Întoarce None altfel — așa scripturile rulează normal fără overhead.
+    Returns a BenchWriter if BENCH=1 or BENCH_OUT is set.
+    Returns None otherwise — so scripts run normally without overhead.
 
-    Variabile de mediu:
-      BENCH       = 1 / 0  (activează / dezactivează)
-      BENCH_OUT   = cale fișier CSV (suprascrie default_path)
+    Environment variables:
+      BENCH       = 1 / 0  (enable / disable)
+      BENCH_OUT   = CSV file path (overrides default_path)
       BENCH_VARIANT = label (cpu / hailo / etc)
     """
     if not (os.getenv("BENCH") == "1" or os.getenv("BENCH_OUT")):
         return None
     out = os.getenv("BENCH_OUT", default_path)
     variant = os.getenv("BENCH_VARIANT", default_variant)
-    print(f"[BENCH] Timing activat. Scriu în: {out} (variant={variant})")
+    print(f"[BENCH] Timing enabled. Writing to: {out} (variant={variant})")
     return BenchWriter(out, variant=variant)

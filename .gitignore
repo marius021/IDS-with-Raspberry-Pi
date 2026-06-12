@@ -28,3 +28,21 @@ ids_test/sample_big.csv
 ids_test/sample_labeled.csv
 ids_test/friday_ddos.csv
 
+
+# --- cleanup_repo.sh additions ---
+# runtime logs
+ids_test/actions*.log
+ids_test/alerts*.log
+ids_test/*hailort*.log
+ids_test/pyhailort.log
+
+# Hailo intermediate compilation artifacts (regenerable via recompile_hailo.py)
+ids_test/*.alls
+ids_test/*.har
+
+# temporary test data
+ids_test/test2*.csv
+ids_test/pi_flows.csv
+ids_test/validation_report.json
+ids_test/live_sample_bench.csv
+# (bench_results/ kept under version control by choice — not ignored)

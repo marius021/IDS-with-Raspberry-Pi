@@ -3,16 +3,16 @@
 """
 gen_report.py
 
-Citește toate CSV-urile dintr-un director de benchmark și generează
-un raport Markdown cu tabelele pentru documentație.
+Reads all CSVs from a benchmark directory and generates
+a Markdown report with tables for documentation.
 
-Așteaptă în --bench-dir:
+Expects in --bench-dir:
   timing_cpu.csv
   timing_hailo.csv
   resources_cpu.csv
   resources_hailo.csv
 
-Folosire:
+Usage:
   python3 gen_report.py --bench-dir bench_results/20260509_180000 --out report.md
 """
 
@@ -34,7 +34,7 @@ def fmt(x, prec=2):
 
 def load_timing(path: Path):
     if not path.exists():
-        print(f"[WARN] Lipsește {path}")
+        print(f"[WARN] Missing {path}")
         return None
     df = pd.read_csv(path)
     return df
@@ -42,16 +42,16 @@ def load_timing(path: Path):
 
 def load_resources(path: Path):
     if not path.exists():
-        print(f"[WARN] Lipsește {path}")
+        print(f"[WARN] Missing {path}")
         return None
     df = pd.read_csv(path)
     return df
 
 
 def stage_latency_table(t_cpu, t_hailo):
-    """Tabel 1: latență per stadiu (ms per batch, mediu)."""
+    """Table 1: latency per stage (ms per batch, average)."""
     stages = ["read", "preprocess", "inference", "postprocess", "log"]
-    lines = ["### Tabel 1 — Latență per stadiu (ms / batch, valori medii)",
+    lines = ["### Table 1 — Latency per stage (ms / batch, average values)",
              "",
              "| Stage | CPU (ONNX) | Hailo (HEF) | Hailo / CPU |",
              "|---|---:|---:|---:|"]
@@ -70,8 +70,8 @@ def stage_latency_table(t_cpu, t_hailo):
 
 
 def throughput_table(t_cpu, t_hailo):
-    """Tabel 2: throughput end-to-end."""
-    lines = ["### Tabel 2 — Throughput end-to-end",
+    """Table 2: end-to-end throughput."""
+    lines = ["### Table 2 — End-to-end throughput",
              "",
              "| Metric | CPU (ONNX) | Hailo (HEF) |",
              "|---|---:|---:|"]
@@ -102,14 +102,14 @@ def throughput_table(t_cpu, t_hailo):
     sh = stats(t_hailo)
 
     rows = [
-        ("Total rânduri procesate", "total_rows", 0),
-        ("Total batch-uri", "n_batches", 0),
+        ("Total rows processed", "total_rows", 0),
+        ("Total batches", "n_batches", 0),
         ("Throughput (rows/s)", "rows_per_s", 1),
-        ("Latență medie per rând (ms)", "avg_lat_per_inf_ms", 4),
-        ("Latență medie per batch (ms)", "avg_batch_lat_ms", 3),
-        ("Latență p50 per batch (ms)", "p50_batch_ms", 3),
-        ("Latență p95 per batch (ms)", "p95_batch_ms", 3),
-        ("Latență p99 per batch (ms)", "p99_batch_ms", 3),
+        ("Average latency per row (ms)", "avg_lat_per_inf_ms", 4),
+        ("Average latency per batch (ms)", "avg_batch_lat_ms", 3),
+        ("p50 latency per batch (ms)", "p50_batch_ms", 3),
+        ("p95 latency per batch (ms)", "p95_batch_ms", 3),
+        ("p99 latency per batch (ms)", "p99_batch_ms", 3),
     ]
     for label, key, prec in rows:
         cpu_v = sc.get(key)
@@ -120,8 +120,8 @@ def throughput_table(t_cpu, t_hailo):
 
 
 def resources_table(r_cpu, r_hailo):
-    """Tabel 3: resurse sistem în steady state."""
-    lines = ["### Tabel 3 — Utilizare resurse (steady state)",
+    """Table 3: system resources in steady state."""
+    lines = ["### Table 3 — Resource utilization (steady state)",
              "",
              "| Metric | CPU (ONNX) | Hailo (HEF) |",
              "|---|---:|---:|"]
@@ -129,7 +129,7 @@ def resources_table(r_cpu, r_hailo):
     def stats(df):
         if df is None or df.empty:
             return {}
-        # Skip primele 2 sample-uri (warm-up)
+        # Skip first 2 samples (warm-up)
         df = df.iloc[2:] if len(df) > 2 else df
         return {
             "cpu_total_avg": df["cpu_total_pct"].mean(),
@@ -149,12 +149,12 @@ def resources_table(r_cpu, r_hailo):
     rows = [
         ("CPU total avg (%)", "cpu_total_avg", 1),
         ("CPU total peak (%)", "cpu_total_max", 1),
-        ("CPU proces avg (%)", "cpu_proc_avg", 1),
-        ("CPU proces peak (%)", "cpu_proc_max", 1),
+        ("CPU process avg (%)", "cpu_proc_avg", 1),
+        ("CPU process peak (%)", "cpu_proc_max", 1),
         ("RAM (RSS) avg (MB)", "rss_avg_mb", 1),
         ("RAM (RSS) peak (MB)", "rss_max_mb", 1),
-        ("Temperatura avg (°C)", "temp_avg", 1),
-        ("Temperatura peak (°C)", "temp_max", 1),
+        ("Temperature avg (°C)", "temp_avg", 1),
+        ("Temperature peak (°C)", "temp_max", 1),
     ]
     for label, key, prec in rows:
         lines.append(f"| {label} | {fmt(sc.get(key), prec)} | {fmt(sh.get(key), prec)} |")
@@ -163,8 +163,8 @@ def resources_table(r_cpu, r_hailo):
 
 
 def per_core_table(r_cpu, r_hailo):
-    """Tabel 4: %CPU per core (Pi 5 are 4 cores)."""
-    lines = ["### Tabel 4 — Distribuție %CPU per core (avg)",
+    """Table 4: %CPU per core (Pi 5 has 4 cores)."""
+    lines = ["### Table 4 — %CPU distribution per core (avg)",
              "",
              "| Core | CPU (ONNX) | Hailo (HEF) |",
              "|---|---:|---:|"]
@@ -188,13 +188,13 @@ def per_core_table(r_cpu, r_hailo):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bench-dir", required=True, help="Director cu CSV-uri de benchmark")
-    ap.add_argument("--out", default="report.md", help="Fișier raport Markdown")
+    ap.add_argument("--bench-dir", required=True, help="Directory with benchmark CSVs")
+    ap.add_argument("--out", default="report.md", help="Markdown report file")
     args = ap.parse_args()
 
     base = Path(args.bench_dir)
     if not base.exists():
-        sys.exit(f"Directorul nu există: {base}")
+        sys.exit(f"Directory does not exist: {base}")
 
     t_cpu = load_timing(base / "timing_cpu.csv")
     t_hailo = load_timing(base / "timing_hailo.csv")
@@ -204,7 +204,7 @@ def main():
     parts = [
         f"# Benchmark IPS: CPU vs Hailo",
         f"",
-        f"Director: `{base}`",
+        f"Directory: `{base}`",
         f"",
         f"Hardware: Raspberry Pi 5 + Hailo-8 (26 TOPs, M.2 PCIe)",
         f"",
@@ -220,22 +220,22 @@ def main():
         f"",
         f"---",
         f"",
-        f"## Note interpretare",
+        f"## Interpretation notes",
         f"",
-        f"- **Latență per stadiu**: include overhead-ul activării contextului Hailo per batch ",
-        f"  (~10-50 ms tipic). Pentru un IPS real-time asta e dezirabil; pentru throughput pur ",
-        f"  s-ar putea reduce dacă păstrezi contextul activ între batch-uri.",
-        f"- **CPU proces**: pe varianta CPU(ONNX), procesul saturează 1 core (~100% pe un core ",
-        f"  înseamnă ~25% pe Pi cu 4 cores). Pe Hailo, calculul e descărcat → CPU stă în repaus.",
-        f"- **RAM**: similar pe ambele variante (modelul e mic), majoritatea consumului e Python ",
+        f"- **Latency per stage**: includes the Hailo context activation overhead per batch ",
+        f"  (~10-50 ms typical). For a real-time IPS this is acceptable; for pure throughput ",
+        f"  it could be reduced by keeping the context active between batches.",
+        f"- **CPU process**: on the CPU (ONNX) variant, the process saturates 1 core (~100% on one core ",
+        f"  means ~25% on a Pi with 4 cores). On Hailo, computation is offloaded → CPU sits idle.",
+        f"- **RAM**: similar on both variants (the model is small), most consumption is Python ",
         f"  + pandas + onnxruntime/HailoRT.",
     ]
 
     out_path = Path(args.out)
     out_path.write_text("\n".join(parts), encoding="utf-8")
-    print(f"[REPORT] Scris în: {out_path}")
+    print(f"[REPORT] Written to: {out_path}")
     print()
-    # Afișează raportul pe stdout
+    # Print report to stdout
     print("\n".join(parts))
 
 

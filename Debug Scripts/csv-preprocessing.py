@@ -15,10 +15,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 
-# ========= Helpers robuste pentru CSV =========
-
 def read_csv_robust(path: Path) -> pd.DataFrame:
-    """Citește CSV cu încercări pe encodări uzuale; sare peste linii corupte ca ultim resort."""
+    """Reads CSV with attempts on common encodings; skips corrupted lines as a last resort."""
     for enc in ("utf-8", "utf-8-sig", "cp1252", "latin1"):
         try:
             return pd.read_csv(path, low_memory=False, encoding=enc)
@@ -33,10 +31,10 @@ def read_csv_robust(path: Path) -> pd.DataFrame:
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalizează header-ele: elimină BOM, spații, lowercase."""
+    """Normalizes headers: removes BOM, strips whitespace, lowercases."""
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\ufeff", "", regex=False)
+        .str.replace("﻿", "", regex=False)
         .str.strip()
         .str.lower()
     )
@@ -44,7 +42,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def find_label_col(cols) -> str:
-    """Identifică numele efectiv al coloanei de etichetă (label/attack/etc.)."""
+    """Identifies the actual name of the label column (label/attack/etc.)."""
     base = [c.strip().lower() for c in cols]
     for cand in ("label", "class", "attack", "category", "result"):
         if cand in base:
@@ -52,11 +50,11 @@ def find_label_col(cols) -> str:
     for c in base:
         if "label" in c or "attack" in c:
             return c
-    raise KeyError(f"Nu găsesc coloana etichetă. Primele coloane: {list(cols)[:10]}")
+    raise KeyError(f"Cannot find the label column. First columns: {list(cols)[:10]}")
 
 
 def _discover_csvs(data_dir: Path) -> list[Path]:
-    """Caută CSV-urile uzuale din CICIDS2017."""
+    """Searches for common CSVs from CICIDS2017."""
     patterns = [
         "TrafficLabelling_*.csv",
         "TrafficLabelling-*.csv",
@@ -75,19 +73,19 @@ def _discover_csvs(data_dir: Path) -> list[Path]:
 
 
 def load_data(data_dir: Path, csv_files: list[str] | None = None) -> pd.DataFrame:
-    """Încarcă toate CSV-urile și unifică eticheta la 'label'."""
+    """Loads all CSVs and unifies the label to 'label'."""
     data_dir = Path(data_dir)
     paths = [data_dir / f for f in csv_files] if csv_files else _discover_csvs(data_dir)
     if not paths:
-        raise FileNotFoundError(f"Niciun CSV găsit în {data_dir}")
+        raise FileNotFoundError(f"No CSV found in {data_dir}")
 
     missing = [p.name for p in paths if not p.exists()]
     if missing:
-        raise FileNotFoundError(f"Lipsesc fișiere în {data_dir}: {missing}")
+        raise FileNotFoundError(f"Missing files in {data_dir}: {missing}")
 
     dfs = []
     for p in paths:
-        print(f"[INFO] Încarc {p.name} ...")
+        print(f"[INFO] Loading {p.name} ...")
         df = read_csv_robust(p)
         df = normalize_columns(df)
         lab_col = find_label_col(df.columns)
@@ -109,7 +107,7 @@ def detect_time_col(df: pd.DataFrame) -> str | None:
 
 
 def clean_and_sort(df: pd.DataFrame):
-    """Curățare numerică + sortare temporală."""
+    """Numeric cleaning + temporal sorting."""
     df = df.copy()
     time_col = detect_time_col(df)
     if time_col is not None:
@@ -213,11 +211,11 @@ def train_binary(X_train, X_val, X_test, y_train, y_val, y_test, epochs=12, batc
                       input_names=["input"], output_names=["prob"],
                       opset_version=12,
                       dynamic_axes={"input": {0: "batch"}, "prob": {0: "batch"}})
-    print("Salvat: ids_mlp_binary.onnx")
+    print("Saved: ids_mlp_binary.onnx")
 
 
 def train_multiclass(X_train, X_val, X_test, labels_series, epochs=12, batch_size=2048, lr=1e-3):
-    # pregătește etichetele multiclass
+    # prepare multiclass labels
     labels = labels_series.astype(str).str.strip()
     labels = labels.str.replace(r"^Web Attack.*", "WebAttack", regex=True)
 
@@ -226,7 +224,7 @@ def train_multiclass(X_train, X_val, X_test, labels_series, epochs=12, batch_siz
     classes = list(le.classes_)
     np.save("classes.npy", np.array(classes, dtype=object))
     joblib.dump(le, "label_encoder.joblib")
-    print(f"Clase: {len(classes)} (ex: {classes[:10]})")
+    print(f"Classes: {len(classes)} (e.g.: {classes[:10]})")
 
     tr_end = len(X_train)
     vl_end = tr_end + len(X_val)
@@ -273,7 +271,7 @@ def train_multiclass(X_train, X_val, X_test, labels_series, epochs=12, batch_siz
     if best_state is not None:
         model.load_state_dict(best_state)
 
-    # ===== VARIANTA A: raportează doar clasele prezente în TEST (și/sau în predicții) =====
+    # ===== VARIANT A: report only classes present in TEST (and/or in predictions) =====
     model.eval(); preds, ys = [], []
     with torch.no_grad():
         for xb, yb in test_dl:
@@ -282,14 +280,14 @@ def train_multiclass(X_train, X_val, X_test, labels_series, epochs=12, batch_siz
     preds = np.asarray(preds)
     ys = np.asarray(ys)
 
-    present = np.unique(np.concatenate([ys, preds]))     # toate clasele observate
+    present = np.unique(np.concatenate([ys, preds]))     # all observed classes
     names_present = [classes[i] for i in present]
 
     print("\n[MULTI-CLASS] Classification report (TEST):")
     print(classification_report(
         ys, preds,
         labels=present,                 # <<— IMPORTANT
-        target_names=names_present,     # sincron cu 'labels'
+        target_names=names_present,     # in sync with 'labels'
         digits=4,
         zero_division=0
     ))
@@ -299,39 +297,39 @@ def train_multiclass(X_train, X_val, X_test, labels_series, epochs=12, batch_siz
                       input_names=["input"], output_names=["logits"],
                       opset_version=12,
                       dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}})
-    print("Salvat: ids_mlp_multiclass.onnx")
+    print("Saved: ids_mlp_multiclass.onnx")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=str, required=True,
-                        help="Folderul cu CSV-urile CIC-IDS2017 (flow-level)")
-    parser.add_argument("--epochs", type=int, default=12, help="Numărul de epoci.")
+                        help="Folder with CIC-IDS2017 CSVs (flow-level)")
+    parser.add_argument("--epochs", type=int, default=12, help="Number of epochs.")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
 
-    print("Încarc datele din:", data_dir)
+    print("Loading data from:", data_dir)
     raw = load_data(data_dir)
-    print("Shape brut:", raw.shape)
+    print("Raw shape:", raw.shape)
 
     df, time_col = clean_and_sort(raw)
-    print("După curățare/sortare:", df.shape, "| coloană timp:", time_col)
+    print("After cleaning/sorting:", df.shape, "| time column:", time_col)
 
-    # Feature matrix (numerice) — exclude etichete/metadate
+    # Feature matrix (numeric) — exclude labels/metadata
     drop_cols = ["label", "__source_file"]
     X_df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
     X_df = X_df.select_dtypes(include=[np.number]).copy()
     if X_df.shape[1] == 0:
-        raise RuntimeError("Nu au rămas coloane numerice după filtrare.")
+        raise RuntimeError("No numeric columns remaining after filtering.")
     np.save("feature_names.npy", np.array(X_df.columns.tolist(), dtype=object))
-    print("[INFO] Salvat feature_names.npy cu", len(X_df.columns), "coloane.")
+    print("[INFO] Saved feature_names.npy with", len(X_df.columns), "columns.")
 
 
     # Binary labels
     y_bin = (df["label"].str.upper() != "BENIGN").astype(int).values
 
-    # Split pe timp
+    # Time-based split
     X_train, X_val, X_test, y_train, y_val, y_test = time_split(X_df, y_bin)
 
     # Scale
@@ -340,13 +338,13 @@ def main():
     X_val_s = scaler.transform(X_val)
     X_test_s = scaler.transform(X_test)
     joblib.dump(scaler, "scaler.joblib")
-    print("Scaler salvat: scaler.joblib")
+    print("Scaler saved: scaler.joblib")
 
     # Train & export
     train_binary(X_train_s, X_val_s, X_test_s, y_train, y_val, y_test, epochs=args.epochs)
     train_multiclass(X_train_s, X_val_s, X_test_s, df["label"], epochs=args.epochs)
 
-    print("\nFișiere generate:")
+    print("\nGenerated files:")
     print(" - scaler.joblib")
     print(" - ids_mlp_binary.onnx")
     print(" - ids_mlp_multiclass.onnx")

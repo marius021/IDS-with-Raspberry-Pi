@@ -104,8 +104,8 @@ def resource_stats(df):
 
 # --- Tables ---
 def table_1_summary(all_t, all_r):
-    """Tabel 1 — Summary throughput + acuratețe utilizare CPU."""
-    lines = ["### Tabel 1 — Rezumat general (per run, după warm-up)",
+    """Table 1 — Summary throughput + CPU utilization accuracy."""
+    lines = ["### Table 1 — General summary (per run, after warm-up)",
              "",
              "| Engine | Batch | Batches | Rows/sec | Avg total/batch (ms) | Proc CPU avg (%) | Cores util. | Temp max (°C) |",
              "|---|---:|---:|---:|---:|---:|---:|---:|"]
@@ -124,8 +124,8 @@ def table_1_summary(all_t, all_r):
 
 
 def table_2_stage_latency(all_t):
-    """Tabel 2 — Defalcare latență pe stage-uri."""
-    lines = ["### Tabel 2 — Latență medie pe stage (ms / batch, după warm-up)",
+    """Table 2 — Latency breakdown by stage."""
+    lines = ["### Table 2 — Average latency per stage (ms / batch, after warm-up)",
              "",
              "| Engine | Batch | Preproc | Inference | Postproc | Log | TOTAL |",
              "|---|---:|---:|---:|---:|---:|---:|"]
@@ -144,8 +144,8 @@ def table_2_stage_latency(all_t):
 
 
 def table_3_latency_percentiles(all_t):
-    """Tabel 3 — Distribuția latenței end-to-end."""
-    lines = ["### Tabel 3 — Latență end-to-end per batch (percentile, ms)",
+    """Table 3 — End-to-end latency distribution."""
+    lines = ["### Table 3 — End-to-end latency per batch (percentiles, ms)",
              "",
              "| Engine | Batch | p50 | p95 | p99 | Inference p95 |",
              "|---|---:|---:|---:|---:|---:|"]
@@ -161,10 +161,10 @@ def table_3_latency_percentiles(all_t):
 
 
 def table_4_throughput_per_row(all_t):
-    """Tabel 4 — Cost per rând."""
-    lines = ["### Tabel 4 — Cost de procesare per rând",
+    """Table 4 — Cost per row."""
+    lines = ["### Table 4 — Processing cost per row",
              "",
-             "| Engine | Batch | μs / rând | Rows/sec |",
+             "| Engine | Batch | μs / row | Rows/sec |",
              "|---|---:|---:|---:|"]
     for engine in ENGINES:
         for batch in BATCH_SIZES:
@@ -177,8 +177,8 @@ def table_4_throughput_per_row(all_t):
 
 
 def table_5_resources(all_r):
-    """Tabel 5 — Utilizare resurse sistem."""
-    lines = ["### Tabel 5 — Utilizare resurse sistem (steady-state)",
+    """Table 5 — System resource utilization."""
+    lines = ["### Table 5 — System resource utilization (steady-state)",
              "",
              "| Engine | Batch | CPU total avg/max (%) | Proc CPU avg/max (% on 1-core scale) | RAM avg/max (MB) | Temp avg/max (°C) |",
              "|---|---:|---|---|---|---|"]
@@ -194,10 +194,10 @@ def table_5_resources(all_r):
 
 
 def table_6_efficiency_gain(all_t, all_r):
-    """Tabel 6 — Câștigul Hailo față de CPU."""
-    lines = ["### Tabel 6 — Câștig relativ Hailo față de CPU (la același batch size)",
+    """Table 6 — Hailo gain versus CPU."""
+    lines = ["### Table 6 — Relative gain of Hailo versus CPU (at the same batch size)",
              "",
-             "| Batch | Δ Latență totală | Δ CPU proces | Δ Temperatura max | Δ Throughput |",
+             "| Batch | Δ Total latency | Δ Process CPU | Δ Max temperature | Δ Throughput |",
              "|---:|---:|---:|---:|---:|"]
     for batch in BATCH_SIZES:
         tc, th = all_t.get(("cpu", batch), {}), all_t.get(("hailo", batch), {})
@@ -227,8 +227,8 @@ def table_6_efficiency_gain(all_t, all_r):
 
 
 def table_7_per_core(all_r):
-    """Tabel 7 — Distribuția pe cores."""
-    lines = ["### Tabel 7 — Distribuția utilizării CPU per core (medie, %)",
+    """Table 7 — CPU core distribution."""
+    lines = ["### Table 7 — CPU utilization distribution per core (average, %)",
              "",
              "| Engine | Batch | Core 0 | Core 1 | Core 2 | Core 3 |",
              "|---|---:|---:|---:|---:|---:|"]
@@ -248,23 +248,23 @@ def table_7_per_core(all_r):
 
 
 def table_8_methodology(base):
-    """Tabel 8 — Setup experimental."""
-    return f"""### Tabel 8 — Metodologie experimentală
+    """Table 8 — Experimental setup."""
+    return f"""### Table 8 — Experimental methodology
 
-| Parametru | Valoare |
+| Parameter | Value |
 |---|---|
-| Director rezultate | `{base.name}` |
+| Results directory | `{base.name}` |
 | Hardware | Raspberry Pi 5 (4 cores, ARM Cortex-A76 @ 2.4 GHz) |
 | Accelerator | Hailo-8 (26 TOPS, M.2 PCIe) |
-| Software CPU | ONNX Runtime (CPUExecutionProvider) |
-| Software NPU | HailoRT 4.20+ (PyHailoRT) |
-| Model | MLP binar (80 features → 2 logits) |
-| Quantizare | INT8 (DFC opt_level=2: bias_correction + adaround) |
-| Dataset injectat | CICIDS2017 Friday DDoS (225 745 flow-uri) |
-| Durată / run | 90 secunde (steady state după warm-up) |
-| Batch sizes testate | 32, 128, 512 |
-| Warm-up exclus | primele 5 batches, primele 3 sample-uri resurse |
-| Mod IPS | `--dry-run` (fără iptables, pentru benchmark izolat) |
+| CPU software | ONNX Runtime (CPUExecutionProvider) |
+| NPU software | HailoRT 4.20+ (PyHailoRT) |
+| Model | Binary MLP (80 features → 2 logits) |
+| Quantization | INT8 (DFC opt_level=2: bias_correction + adaround) |
+| Injected dataset | CICIDS2017 Friday DDoS (225 745 flows) |
+| Duration / run | 90 seconds (steady state after warm-up) |
+| Tested batch sizes | 32, 128, 512 |
+| Excluded warm-up | first 5 batches, first 3 resource samples |
+| IPS mode | `--dry-run` (no iptables, for isolated benchmark) |
 """
 
 
@@ -285,7 +285,7 @@ def fig_temperature(all_r_df, out_dir):
         ax.grid(alpha=0.3)
         ax.legend(loc="lower right", fontsize=8)
     axes[0].set_ylabel("CPU temperature (°C)")
-    fig.suptitle("Termalizare CPU în timp — CPU (ONNX) vs Hailo NPU", fontsize=12)
+    fig.suptitle("CPU temperature over time — CPU (ONNX) vs Hailo NPU", fontsize=12)
     plt.tight_layout()
     out = out_dir / "fig_temperature.png"
     plt.savefig(out, dpi=140, bbox_inches="tight"); plt.close()
@@ -308,7 +308,7 @@ def fig_proc_cpu(all_r_df, out_dir):
         ax.grid(alpha=0.3)
         ax.legend(loc="upper right", fontsize=8)
     axes[0].set_ylabel("Process CPU (% on 1-core scale)")
-    fig.suptitle("Utilizarea CPU de către procesul IPS — CPU vs Hailo",
+    fig.suptitle("IPS process CPU utilization — CPU vs Hailo",
                  fontsize=12)
     plt.tight_layout()
     out = out_dir / "fig_proc_cpu.png"
@@ -353,7 +353,7 @@ def fig_latency_distribution(all_t_df, out_dir):
         ax.set_ylabel("Frequency")
         ax.grid(alpha=0.3)
         ax.legend(fontsize=8)
-    fig.suptitle("Distribuția latenței end-to-end per batch", fontsize=12)
+    fig.suptitle("End-to-end latency distribution per batch", fontsize=12)
     plt.tight_layout()
     out = out_dir / "fig_latency_dist.png"
     plt.savefig(out, dpi=140, bbox_inches="tight"); plt.close()
@@ -385,7 +385,7 @@ def fig_stage_breakdown(all_t, out_dir):
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
     ax.set_ylabel("Average latency per batch (ms)")
-    ax.set_title("Defalcarea latenței per stage — CPU vs Hailo, pe batch sizes")
+    ax.set_title("Latency breakdown per stage — CPU vs Hailo, by batch sizes")
     ax.legend()
     ax.grid(alpha=0.3, axis="y")
     plt.tight_layout()
@@ -413,7 +413,7 @@ def fig_efficiency(all_r_df, all_t, out_dir):
                         xytext=(8, 8), fontsize=9)
     ax.set_xlabel("Process CPU usage (% on 1-core scale)")
     ax.set_ylabel("Throughput (rows/sec)")
-    ax.set_title("Eficiență: throughput vs cost CPU")
+    ax.set_title("Efficiency: throughput vs CPU cost")
     ax.grid(alpha=0.3)
     ax.legend()
     plt.tight_layout()
@@ -449,11 +449,11 @@ def main():
 
     # Build report
     parts = [
-        "# Faza E — Scaling Benchmark CPU vs Hailo NPU",
+        "# Phase E — Scaling Benchmark CPU vs Hailo NPU",
         "",
-        f"**Director rezultate**: `{base}`",
+        f"**Results directory**: `{base}`",
         "",
-        "**Setup**: Raspberry Pi 5 + Hailo-8 (M.2 PCIe), MLP binar (80→64→32→2), "
+        "**Setup**: Raspberry Pi 5 + Hailo-8 (M.2 PCIe), binary MLP (80→64→32→2), "
         "INT8 quantization opt_level=2.",
         "",
         "---",
@@ -468,27 +468,26 @@ def main():
         table_7_per_core(all_r), "",
         "---",
         "",
-        "## Figuri generate",
+        "## Generated figures",
         "",
-        "- `fig_temperature.png`     — termalizare în timp",
-        "- `fig_proc_cpu.png`        — utilizarea CPU procesului în timp",
+        "- `fig_temperature.png`     — temperature over time",
+        "- `fig_proc_cpu.png`        — process CPU utilization over time",
         "- `fig_throughput.png`      — throughput vs batch size",
-        "- `fig_latency_dist.png`    — distribuția latenței",
-        "- `fig_stage_breakdown.png` — defalcare per stage",
-        "- `fig_efficiency.png`      — throughput vs cost CPU",
+        "- `fig_latency_dist.png`    — latency distribution",
+        "- `fig_stage_breakdown.png` — breakdown per stage",
+        "- `fig_efficiency.png`      — throughput vs CPU cost",
         "",
-        "## Note interpretare",
+        "## Interpretation notes",
         "",
-        "- **Latența de inferență pură** este mai mică pe CPU pentru modelul "
-        "extrem de mic (MLP cu ~10k parametri) — overhead-ul PCIe domină câștigul "
-        "Hailo.",
-        "- **Utilizarea CPU** este cu 60–70% mai mică pe Hailo, eliberând cores "
-        "pentru cicflowmeter, iptables, logging — esențial pentru un IPS in-line.",
-        "- **Temperatura** confirmă diferența de efort: CPU runs ating ~60°C, "
-        "Hailo runs rămân la ~54°C la aceeași încărcare de date.",
-        "- **Scalarea cu batch size** beneficiază ambele variante, dar la "
-        "batch ≥ 128 bottleneck-ul nu mai este inferența ci pipeline-ul "
-        "pandas + scaler.",
+        "- **Pure inference latency** is lower on CPU for the extremely small model "
+        "(MLP with ~10k parameters) — PCIe overhead dominates the Hailo gain.",
+        "- **CPU utilization** is 60–70% lower on Hailo, freeing cores "
+        "for cicflowmeter, iptables, logging — essential for an in-line IPS.",
+        "- **Temperature** confirms the difference in workload: CPU runs reach ~60°C, "
+        "Hailo runs stay at ~54°C under the same data load.",
+        "- **Scaling with batch size** benefits both variants, but at "
+        "batch >= 128 the bottleneck is no longer inference but the "
+        "pandas + scaler pipeline.",
     ]
 
     out_path = Path(args.out)

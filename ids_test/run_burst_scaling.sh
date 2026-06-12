@@ -1,16 +1,16 @@
 #!/bin/bash
-# run_burst_scaling.sh — Burst benchmark cu mai multe batch sizes.
+# run_burst_scaling.sh — Burst benchmark with multiple batch sizes.
 #
-# Rulează run_burst_bench.sh cu BATCH=32, 128, 512 (sau ce e in BATCH_SIZES),
-# apoi agregă rezultatele într-un raport unic de scaling.
+# Runs run_burst_bench.sh with BATCH=32, 128, 512 (or whatever is in BATCH_SIZES),
+# then aggregates the results into a single scaling report.
 #
-# Folosire:
+# Usage:
 #   bash run_burst_scaling.sh
 #
-# Variabile opționale:
+# Optional variables:
 #   BATCH_SIZES   - default: "32 128 512"
 #   BURST_CSV     - default: $ROOT_DIR/friday_ddos.csv
-#   MAX_WAIT_SEC  - timeout per rulare (default: 600)
+#   MAX_WAIT_SEC  - timeout per run (default: 600)
 
 set -e
 
@@ -35,33 +35,33 @@ echo ""
 for BATCH_VAL in $BATCH_SIZES; do
     echo ""
     echo "##################################################"
-    echo "##  BURST cu BATCH = $BATCH_VAL"
+    echo "##  BURST with BATCH = $BATCH_VAL"
     echo "##################################################"
 
     BATCH="$BATCH_VAL" \
     BURST_CSV="$BURST_CSV" \
     MAX_WAIT_SEC="$MAX_WAIT_SEC" \
         bash "$ROOT_DIR/run_burst_bench.sh" || {
-        echo "[ERR] Rulare cu BATCH=$BATCH_VAL a esuat. Continui."
+        echo "[ERR] Run with BATCH=$BATCH_VAL failed. Continuing."
         continue
     }
 
-    # Mut rezultatele in directorul de scaling
+    # Move results into the scaling directory
     LATEST_DIR=$(ls -1dt "$ROOT_DIR/bench_results/burst_"*/ 2>/dev/null \
                  | grep -v "burst_scaling_" | head -1 | sed 's:/$::')
     if [[ -z "$LATEST_DIR" ]]; then
-        echo "[WARN] Nu am gasit directorul de output pentru BATCH=$BATCH_VAL"
+        echo "[WARN] Could not find output directory for BATCH=$BATCH_VAL"
         continue
     fi
 
-    echo "[SCALE] Mut rezultate in $SCALING_DIR/batch_${BATCH_VAL}/"
+    echo "[SCALE] Moving results to $SCALING_DIR/batch_${BATCH_VAL}/"
     mv "$LATEST_DIR" "$SCALING_DIR/batch_${BATCH_VAL}"
 done
 
-# Genereaza raportul de scaling
+# Generate scaling report
 echo ""
 echo "=================================================="
-echo "  GENERARE RAPORT SCALING"
+echo "  GENERATE SCALING REPORT"
 echo "=================================================="
 
 if [[ -f "$ROOT_DIR/venv_ids/bin/activate" ]]; then
@@ -73,18 +73,18 @@ python3 "$ROOT_DIR/gen_scaling_report.py" \
     --scaling-dir "$SCALING_DIR" \
     --out "$SCALING_DIR/scaling_report.md"
 
-# Adauga wall time la raport
+# Add wall time to report
 echo ""
 echo "=================================================="
-echo "  WALL TIME END-TO-END (sumar)"
+echo "  WALL TIME END-TO-END (summary)"
 echo "=================================================="
 
 WALL_TIME_TABLE="$SCALING_DIR/wall_time_summary.md"
 {
     echo "# Wall Time End-to-End per BATCH"
     echo ""
-    echo "Sursa: $BURST_CSV"
-    echo "Numar randuri: $(($(wc -l < "$BURST_CSV") - 1))"
+    echo "Source: $BURST_CSV"
+    echo "Number of rows: $(($(wc -l < "$BURST_CSV") - 1))"
     echo ""
     echo "| Batch | CPU (sec) | Hailo (sec) | CPU rows/s | Hailo rows/s |"
     echo "|---|---:|---:|---:|---:|"
@@ -112,5 +112,5 @@ WALL_TIME_TABLE="$SCALING_DIR/wall_time_summary.md"
 cat "$WALL_TIME_TABLE"
 
 echo ""
-echo "[DONE] Raport scaling:  $SCALING_DIR/scaling_report.md"
-echo "[DONE] Raport wall-time: $WALL_TIME_TABLE"
+echo "[DONE] Scaling report:   $SCALING_DIR/scaling_report.md"
+echo "[DONE] Wall-time report: $WALL_TIME_TABLE"

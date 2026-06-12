@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-cicfm_to_cicids.py (v2 — cu fix de unități timp)
+cicfm_to_cicids.py (v2 — with time unit fix)
 
-Convertește un CSV produs de cicflowmeter (fork-ul hieulw v0.4.x) în formatul
-schemei CICIDS2017 pe care îl așteaptă modelul.
+Converts a CSV produced by cicflowmeter (hieulw fork v0.4.x) into the
+CICIDS2017 schema format expected by the model.
 
-DIFERENȚE PRINCIPALE FAȚĂ DE V1:
-  - Aplică conversie sec → microsec (× 1.000.000) pentru toate features de timp.
-    Cauza: CICFlowMeter Java (folosit la generarea CICIDS2017) scrie timpii
-    în microsecunde. cicflowmeter Python (hieulw fork) scrie în secunde.
-    Modelul a fost antrenat pe schema CICIDS2017 (microsec), deci convertim.
+MAIN DIFFERENCES FROM V1:
+  - Applies conversion sec → microsec (× 1,000,000) for all time features.
+    Reason: CICFlowMeter Java (used to generate CICIDS2017) writes times
+    in microseconds. cicflowmeter Python (hieulw fork) writes in seconds.
+    The model was trained on the CICIDS2017 schema (microsec), so we convert.
 
-CE NU SE ATINGE:
-  - Rate-urile (Flow Bytes/s, Flow Packets/s, Fwd/Bwd Packets/s) — sunt deja
-    în "per second" în ambele implementări.
-  - Numerele de flag-uri (SYN, ACK, etc.) — folosesc aceleași definiții.
-  - Lungimile de pachete (Packet Length Max/Min/etc.) — în bytes peste tot.
+WHAT IS NOT TOUCHED:
+  - Rates (Flow Bytes/s, Flow Packets/s, Fwd/Bwd Packets/s) — already
+    in "per second" in both implementations.
+  - Flag counts (SYN, ACK, etc.) — use the same definitions.
+  - Packet lengths (Packet Length Max/Min/etc.) — in bytes everywhere.
 
-Folosire:
+Usage:
   python3 cicfm_to_cicids.py input.csv output.csv
 """
 
@@ -30,7 +30,7 @@ import pandas as pd
 import numpy as np
 
 
-# Ordinea exactă a features din feature_names.txt (model)
+# Exact feature order from feature_names.txt (model)
 EXPECTED_FEATURES = [
     "source port",
     "destination port",
@@ -197,8 +197,8 @@ CICFM_TO_CICIDS = {
     "idle_min": "idle min",
 }
 
-# Features de timp care trebuie multiplicate cu 1.000.000 (sec → microsec)
-# IMPORTANT: doar feature-urile care reprezintă durate, NU rate-urile.
+# Time features that must be multiplied by 1,000,000 (sec → microsec)
+# IMPORTANT: only features representing durations, NOT rates.
 TIME_FEATURES_TO_SCALE = [
     "flow duration",
     "flow iat mean",
@@ -231,17 +231,17 @@ SEC_TO_MICROSEC = 1_000_000
 def convert(input_csv: Path, output_csv: Path, default_label: str = "BENIGN",
             scale_time: bool = True):
     df = pd.read_csv(input_csv)
-    print(f"[CONVERT] Input:  {len(df)} rânduri × {len(df.columns)} coloane")
+    print(f"[CONVERT] Input:  {len(df)} rows × {len(df.columns)} columns")
 
     missing_in_input = [c for c in CICFM_TO_CICIDS.keys() if c not in df.columns]
     if missing_in_input:
-        print(f"[WARN] Coloane lipsă în input (vor fi umplute cu 0):")
+        print(f"[WARN] Columns missing from input (will be filled with 0):")
         for c in missing_in_input:
             print(f"       - {c}")
 
     out = pd.DataFrame()
 
-    # Metadata pentru IPS
+    # Metadata for IPS
     if "src_ip" in df.columns:
         out["source ip"] = df["src_ip"]
     if "dst_ip" in df.columns:
@@ -256,47 +256,47 @@ def convert(input_csv: Path, output_csv: Path, default_label: str = "BENIGN",
         else:
             out[cicids_col] = 0
 
-    # Cazul special: "fwd header length.1" e duplicat al "fwd header length"
+    # Special case: "fwd header length.1" is a duplicate of "fwd header length"
     if "fwd_header_len" in df.columns:
         out["fwd header length.1"] = df["fwd_header_len"]
     else:
         out["fwd header length.1"] = 0
 
-    # Curățare valori non-finite
+    # Clean non-finite values
     for col in out.select_dtypes(include=[np.number]).columns:
         out[col] = out[col].replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # FIX UNITS: convert features de timp din secunde în microsecunde
+    # FIX UNITS: convert time features from seconds to microseconds
     if scale_time:
         scaled_count = 0
         for feat in TIME_FEATURES_TO_SCALE:
             if feat in out.columns:
-                # Verifică dacă valorile par să fie în secunde (mici) vs microsec (mari)
-                # Heuristic: dacă median < 1000, e probabil în secunde
+                # Check whether values appear to be in seconds (small) vs microsec (large)
+                # Heuristic: if median < 1000, it's probably in seconds
                 if pd.api.types.is_numeric_dtype(out[feat]):
                     out[feat] = out[feat] * SEC_TO_MICROSEC
                     scaled_count += 1
-        print(f"[CONVERT] Aplicat conversie sec → microsec pentru {scaled_count} features")
+        print(f"[CONVERT] Applied sec → microsec conversion for {scaled_count} features")
 
-    # Label implicit
+    # Default label
     out["label"] = default_label
 
-    # Reordonare coloane
+    # Reorder columns
     metadata_cols = [c for c in ["source ip", "destination ip", "timestamp"] if c in out.columns]
     final_cols = metadata_cols + EXPECTED_FEATURES + ["label"]
     out = out[final_cols]
 
     out.to_csv(output_csv, index=False)
-    print(f"[CONVERT] Output: {len(out)} rânduri × {len(out.columns)} coloane")
-    print(f"[CONVERT] Salvat: {output_csv}")
+    print(f"[CONVERT] Output: {len(out)} rows × {len(out.columns)} columns")
+    print(f"[CONVERT] Saved: {output_csv}")
 
-    # Sumar diagnostic
+    # Diagnostic summary
     if "source ip" in out.columns:
         print(f"\n[CHECK] Top 5 src_ip:")
         for ip, count in out["source ip"].value_counts().head(5).items():
-            print(f"  {ip:>15s} : {count} flow-uri")
+            print(f"  {ip:>15s} : {count} flows")
 
-    # Statistici flow duration după conversie
+    # Flow duration statistics after conversion
     if "flow duration" in out.columns:
         fd = out["flow duration"]
         print(f"\n[CHECK] flow duration (microsec): "
@@ -304,20 +304,20 @@ def convert(input_csv: Path, output_csv: Path, default_label: str = "BENIGN",
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Convertește CSV cicflowmeter → CICIDS2017 schema")
-    ap.add_argument("input", help="CSV produs de cicflowmeter")
-    ap.add_argument("output", help="CSV output în formatul așteptat de model")
+    ap = argparse.ArgumentParser(description="Convert CSV cicflowmeter → CICIDS2017 schema")
+    ap.add_argument("input", help="CSV produced by cicflowmeter")
+    ap.add_argument("output", help="Output CSV in the format expected by the model")
     ap.add_argument("--label", default="BENIGN",
-                    help="Label implicit (default: BENIGN)")
+                    help="Default label (default: BENIGN)")
     ap.add_argument("--no-time-scale", action="store_true",
-                    help="NU multiplica features de timp (debugging)")
+                    help="Do NOT multiply time features (debugging)")
     args = ap.parse_args()
 
     in_path = Path(args.input)
     out_path = Path(args.output)
 
     if not in_path.exists():
-        sys.exit(f"[ERR] Input lipsește: {in_path}")
+        sys.exit(f"[ERR] Input missing: {in_path}")
 
     convert(in_path, out_path, args.label, scale_time=not args.no_time_scale)
 

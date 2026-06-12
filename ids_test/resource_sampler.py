@@ -3,21 +3,21 @@
 """
 resource_sampler.py
 
-Rulează în paralel cu IPS-ul pentru a măsura resursele Pi-ului.
-Eșantionează la fiecare N secunde:
-  - %CPU total
+Runs in parallel with the IPS to measure Pi resource usage.
+Samples every N seconds:
+  - total %CPU
   - %CPU per core
-  - %CPU procesul țintă
-  - RSS (RAM) procesul țintă
-  - Temperatura CPU
+  - %CPU target process
+  - RSS (RAM) target process
+  - CPU temperature
 
-Folosire:
+Usage:
   python resource_sampler.py --pid <PID_IPS> --out resources_cpu.csv --interval 1 --duration 120
 
-Sau, dacă vrei să atașezi după nume:
+Or, if you want to attach by name:
   python resource_sampler.py --proc-name ips_realtime_v2.py --out resources_cpu.csv
 
-Ctrl-C oprește elegant.
+Ctrl-C stops gracefully.
 """
 
 import argparse
@@ -32,11 +32,11 @@ from pathlib import Path
 try:
     import psutil
 except ImportError:
-    sys.exit("psutil lipsește. Instalează cu: pip install psutil")
+    sys.exit("psutil is missing. Install with: pip install psutil")
 
 
 def find_pid_by_name(needle: str):
-    """Caută primul proces al cărui cmdline conține needle."""
+    """Find the first process whose cmdline contains needle."""
     for p in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             cmdline = " ".join(p.info["cmdline"] or [])
@@ -48,7 +48,7 @@ def find_pid_by_name(needle: str):
 
 
 def get_cpu_temp_celsius():
-    """Citește temperatura CPU pe Raspberry Pi via vcgencmd sau /sys."""
+    """Read CPU temperature on Raspberry Pi via vcgencmd or /sys."""
     # Try vcgencmd first
     try:
         result = subprocess.run(
@@ -72,29 +72,29 @@ def get_cpu_temp_celsius():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pid", type=int, help="PID-ul procesului de monitorizat")
-    ap.add_argument("--proc-name", help="Numele/cmdline-ul procesului (dacă nu ai PID)")
-    ap.add_argument("--out", required=True, help="CSV-ul de output")
+    ap.add_argument("--pid", type=int, help="PID of the process to monitor")
+    ap.add_argument("--proc-name", help="Process name/cmdline (if PID is not available)")
+    ap.add_argument("--out", required=True, help="Output CSV file")
     ap.add_argument("--variant", default="unknown", help="Label: cpu / hailo / etc")
     ap.add_argument("--interval", type=float, default=1.0, help="Interval (sec)")
     ap.add_argument("--duration", type=float, default=0,
-                    help="Durată totală (sec). 0 = până la Ctrl-C")
+                    help="Total duration (sec). 0 = until Ctrl-C")
     args = ap.parse_args()
 
-    # Rezolvă PID
+    # Resolve PID
     pid = args.pid
     if pid is None and args.proc_name:
         pid = find_pid_by_name(args.proc_name)
         if pid is None:
-            sys.exit(f"Nu am găsit niciun proces cu '{args.proc_name}' în cmdline.")
+            sys.exit(f"No process found with '{args.proc_name}' in cmdline.")
 
     if pid is None:
-        sys.exit("Trebuie să specifici --pid sau --proc-name.")
+        sys.exit("You must specify --pid or --proc-name.")
 
     try:
         target = psutil.Process(pid)
     except psutil.NoSuchProcess:
-        sys.exit(f"Procesul {pid} nu există.")
+        sys.exit(f"Process {pid} does not exist.")
 
     n_cores = psutil.cpu_count()
     print(f"[SAMPLER] PID={pid} cmdline=\"{' '.join(target.cmdline()[:3])}...\"")
@@ -113,14 +113,14 @@ def main():
         writer.writerow(cols)
         fh.flush()
 
-    # Init: prima lectură de psutil.cpu_percent returnează 0; descărcăm
+    # Init: first psutil.cpu_percent call returns 0; discard it
     psutil.cpu_percent(interval=None)
     target.cpu_percent(interval=None)
 
     stop = [False]
 
     def sigint_handler(sig, frame):
-        print("\n[SAMPLER] Stop. Salvez și ies.")
+        print("\n[SAMPLER] Stopping. Saving and exiting.")
         stop[0] = True
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -137,7 +137,7 @@ def main():
                 rss_mb = target.memory_info().rss / (1024 * 1024)
                 temp = get_cpu_temp_celsius()
             except psutil.NoSuchProcess:
-                print(f"[SAMPLER] Procesul {pid} a murit. Ies.")
+                print(f"[SAMPLER] Process {pid} has died. Exiting.")
                 break
 
             row = [round(time.time(), 3), args.variant,
@@ -149,7 +149,7 @@ def main():
             fh.flush()
 
             if args.duration > 0 and (time.time() - t_start) >= args.duration:
-                print("[SAMPLER] Durată atinsă. Ies.")
+                print("[SAMPLER] Duration reached. Exiting.")
                 break
     finally:
         fh.close()

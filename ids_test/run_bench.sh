@@ -1,21 +1,21 @@
 #!/bin/bash
 # run_bench.sh — Orchestrator benchmark CPU vs Hailo (v2)
 #
-# Modificări v2:
-#   - Argumente feed_csv.py corecte: --chunk + --delay + --loop
-#   - Verificare sample_big.csv exists, fallback la sample_labeled.csv
-#   - Trunchiere live_sample.csv corectă cu doar header
-#   - Verificare iptables pre-curățare (avertisment dacă sunt reguli)
+# Changes v2:
+#   - Correct feed_csv.py arguments: --chunk + --delay + --loop
+#   - Check sample_big.csv exists, fallback to sample_labeled.csv
+#   - Correct live_sample.csv truncation with header only
+#   - Check iptables pre-cleanup (warning if rules exist)
 #
-# Folosire:
+# Usage:
 #   bash run_bench.sh
 #
-# Variabile de mediu (toate opționale):
+# Environment variables (all optional):
 #   ROOT_DIR          - default: /home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test
 #   SOURCE_CSV        - default: $ROOT_DIR/sample_big.csv (fallback sample_labeled.csv)
-#   RUN_DURATION      - sec per variantă (default: 90)
-#   FEED_CHUNK        - rânduri per tick (default: 50)
-#   FEED_DELAY        - sec între tick-uri (default: 1.0 — dă ~50 rows/sec)
+#   RUN_DURATION      - sec per variant (default: 90)
+#   FEED_CHUNK        - rows per tick (default: 50)
+#   FEED_DELAY        - sec between ticks (default: 1.0 — gives ~50 rows/sec)
 #   THRESHOLD         - default: 0.01
 #   BATCH             - default: 32
 #   POLL              - default: 2
@@ -25,13 +25,13 @@ set -e
 # ---------- CONFIG ----------
 ROOT_DIR="${ROOT_DIR:-/home/maurice/Desktop/IDS-with-Raspberry-Pi/ids_test}"
 
-# Caută o sursă CSV mai mare; fallback la sample_labeled.csv
+# Search for a larger CSV source; fallback to sample_labeled.csv
 if [[ -f "$ROOT_DIR/sample_big.csv" ]]; then
     SOURCE_CSV="${SOURCE_CSV:-$ROOT_DIR/sample_big.csv}"
 elif [[ -f "$ROOT_DIR/sample_labeled.csv" ]]; then
     SOURCE_CSV="${SOURCE_CSV:-$ROOT_DIR/sample_labeled.csv}"
 else
-    echo "[ERR] Nu gasesc nici sample_big.csv, nici sample_labeled.csv in $ROOT_DIR"
+    echo "[ERR] Cannot find sample_big.csv or sample_labeled.csv in $ROOT_DIR"
     exit 1
 fi
 
@@ -40,7 +40,7 @@ RUN_TS=$(date +%Y%m%d_%H%M%S)
 OUT_DIR="$ROOT_DIR/bench_results/$RUN_TS"
 RUN_DURATION="${RUN_DURATION:-90}"
 
-# Feed: 50 randuri / 1 sec = ~50 rows/sec sustained
+# Feed: 50 rows / 1 sec = ~50 rows/sec sustained
 FEED_CHUNK="${FEED_CHUNK:-50}"
 FEED_DELAY="${FEED_DELAY:-1.0}"
 
@@ -57,16 +57,16 @@ echo "[RUN] Source: $SOURCE_CSV"
 echo "[RUN] Duration per variant: ${RUN_DURATION}s"
 echo "[RUN] Feed: $FEED_CHUNK rows / ${FEED_DELAY}s tick"
 
-# Avertisment daca exista reguli iptables active pe IP-uri de test
+# Warning if active iptables rules exist for test IPs
 if sudo iptables -L INPUT -n 2>/dev/null | grep -q "192.168.10"; then
-    echo "[WARN] Reguli iptables active pe 192.168.10.* — poate afecta benchmark-ul."
-    echo "[WARN] Curata cu: sudo iptables -D INPUT -s 192.168.10.X -j DROP"
+    echo "[WARN] Active iptables rules on 192.168.10.* — may affect the benchmark."
+    echo "[WARN] Clean up with: sudo iptables -D INPUT -s 192.168.10.X -j DROP"
 fi
 
-# Pregateste live_sample.csv vid (doar header)
+# Prepare empty live_sample.csv (header only)
 head -n 1 "$SOURCE_CSV" > "$LIVE_CSV"
 
-# Functie: ruleaza o varianta
+# Function: run a variant
 run_variant () {
     local VARIANT="$1"
     local IPS_SCRIPT="$2"
@@ -78,23 +78,23 @@ run_variant () {
     echo "  BENCHMARK: $VARIANT  ($IPS_SCRIPT)"
     echo "============================================================"
 
-    # Reseteaza live_sample (doar header)
+    # Reset live_sample (header only)
     head -n 1 "$SOURCE_CSV" > "$LIVE_CSV"
 
     local TIMING_CSV="$OUT_DIR/timing_$VARIANT.csv"
     local RESOURCES_CSV="$OUT_DIR/resources_$VARIANT.csv"
     local LOG_FILE="$OUT_DIR/run_$VARIANT.log"
 
-    # Activeaza venv-ul
+    # Activate venv
     if [[ -f "$VENV_PATH" ]]; then
         # shellcheck disable=SC1090
         source "$VENV_PATH"
     else
-        echo "[ERR] Venv lipseste: $VENV_PATH"
+        echo "[ERR] Venv missing: $VENV_PATH"
         return 1
     fi
 
-    # Porneste IPS-ul cu BENCH activ
+    # Start IPS with BENCH active
     echo "[RUN] Start IPS ($VARIANT)..."
     BENCH=1 BENCH_OUT="$TIMING_CSV" BENCH_VARIANT="$VARIANT" \
     python3 "$ROOT_DIR/$IPS_SCRIPT" \
@@ -107,16 +107,16 @@ run_variant () {
     IPS_PID=$!
     echo "[RUN] IPS PID = $IPS_PID"
 
-    sleep 4   # warm-up: ONNX session + Hailo VDevice load dureaza
+    sleep 4   # warm-up: ONNX session + Hailo VDevice load takes time
 
-    # Verifica ca IPS-ul e inca viu
+    # Check that IPS is still alive
     if ! kill -0 "$IPS_PID" 2>/dev/null; then
-        echo "[ERR] IPS-ul a crapat la pornire. Vezi: $LOG_FILE"
+        echo "[ERR] IPS crashed at startup. See: $LOG_FILE"
         tail -20 "$LOG_FILE"
         return 1
     fi
 
-    # Porneste resource sampler (paralel)
+    # Start resource sampler (parallel)
     echo "[RUN] Start resource sampler..."
     python3 "$ROOT_DIR/resource_sampler.py" \
         --pid "$IPS_PID" \
@@ -126,7 +126,7 @@ run_variant () {
         --duration "$RUN_DURATION" > "$OUT_DIR/sampler_$VARIANT.log" 2>&1 &
     SAMPLER_PID=$!
 
-    # Porneste feed-ul in paralel — varsa SOURCE_CSV in LIVE_CSV
+    # Start feed in parallel — pumps SOURCE_CSV into LIVE_CSV
     echo "[RUN] Start feed: chunk=$FEED_CHUNK delay=$FEED_DELAY"
     python3 "$ROOT_DIR/feed_csv.py" \
         --src "$SOURCE_CSV" \
@@ -136,20 +136,20 @@ run_variant () {
         --loop > "$OUT_DIR/feed_$VARIANT.log" 2>&1 &
     FEED_PID=$!
 
-    # Verificare dupa 3 sec ca feed-ul ruleaza
+    # Check after 3 sec that the feed is running
     sleep 3
     if ! kill -0 "$FEED_PID" 2>/dev/null; then
-        echo "[ERR] Feed-ul a crapat. Vezi: $OUT_DIR/feed_$VARIANT.log"
+        echo "[ERR] Feed crashed. See: $OUT_DIR/feed_$VARIANT.log"
         tail -10 "$OUT_DIR/feed_$VARIANT.log"
         kill -TERM "$IPS_PID" "$SAMPLER_PID" 2>/dev/null || true
         return 1
     fi
 
-    # Asteapta durata totala
-    echo "[RUN] Rulez timp de ${RUN_DURATION}s..."
+    # Wait for total duration
+    echo "[RUN] Running for ${RUN_DURATION}s..."
     sleep "$RUN_DURATION"
 
-    # Stop ordonat
+    # Orderly shutdown
     echo "[RUN] Stop feed -> sampler -> IPS..."
     kill -TERM "$FEED_PID" 2>/dev/null || true
     sleep 1
@@ -160,26 +160,26 @@ run_variant () {
     kill -KILL "$IPS_PID" 2>/dev/null || true
     kill -KILL "$FEED_PID" "$SAMPLER_PID" 2>/dev/null || true
 
-    # Mic raport pe consola
+    # Small report to console
     echo ""
-    echo "[RUN] $VARIANT terminat."
+    echo "[RUN] $VARIANT done."
     if [[ -f "$TIMING_CSV" ]]; then
         local NB
         NB=$(($(wc -l < "$TIMING_CSV") - 1))
-        echo "      timing:    $TIMING_CSV ($NB batch-uri)"
+        echo "      timing:    $TIMING_CSV ($NB batches)"
     else
-        echo "      [WARN] timing CSV NU s-a scris — verifica $LOG_FILE"
+        echo "      [WARN] timing CSV was NOT written — check $LOG_FILE"
     fi
     if [[ -f "$RESOURCES_CSV" ]]; then
         local NS
         NS=$(($(wc -l < "$RESOURCES_CSV") - 1))
-        echo "      resources: $RESOURCES_CSV ($NS sample-uri)"
+        echo "      resources: $RESOURCES_CSV ($NS samples)"
     fi
 
     deactivate 2>/dev/null || true
 }
 
-# ---------- Ruleaza variantele ----------
+# ---------- Run variants ----------
 
 # 1. CPU (ONNX)
 run_variant "cpu" "ips_realtime_v2.py" "$VENV_CPU" \
@@ -197,7 +197,7 @@ run_variant "hailo" "ips_hailo.py" "$VENV_HAILO" \
      --alert-log $OUT_DIR/alerts_hailo.log \
      --action-log $OUT_DIR/actions_hailo.log"
 
-# ---------- Genereaza raportul ----------
+# ---------- Generate report ----------
 echo ""
 echo "============================================================"
 echo "  GENERATE REPORT"
@@ -211,5 +211,5 @@ python3 "$ROOT_DIR/gen_report.py" --bench-dir "$OUT_DIR" --out "$OUT_DIR/report.
 
 echo ""
 echo "[RUN] DONE."
-echo "[RUN] Raport: $OUT_DIR/report.md"
+echo "[RUN] Report: $OUT_DIR/report.md"
 echo "[RUN] CSVs:   $OUT_DIR/"

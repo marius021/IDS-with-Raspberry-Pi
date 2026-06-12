@@ -42,7 +42,7 @@ RENAME_MAP = {
     "packet length min":               "min packet length",
     "packet length max":               "max packet length",
 
-    # TCP flag — CWR (correct) vs CWE (typo în training)
+    # TCP flag — CWR (correct) vs CWE (typo in training data)
     "cwr flag count":                  "cwe flag count",
 
     # Segment size — ORDER OF WORDS
